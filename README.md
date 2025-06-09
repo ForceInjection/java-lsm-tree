@@ -91,6 +91,313 @@ mvn exec:java -Dexec.mainClass="com.brianxiadong.lsmtree.LSMTreeExample"
 mvn test
 ```
 
+### 运行性能基准测试
+```bash
+# 使用JUnit基准测试
+mvn test -Dtest=LSMTreeBenchmark
+
+# 或直接运行基准测试程序
+mvn exec:java -Dexec.mainClass="com.brianxiadong.lsmtree.BenchmarkRunner"
+```
+
+## 性能基准测试
+
+在现代硬件环境下的性能表现 (Java 8, SSD):
+
+### 写入性能 (ops/sec)
+| 测试类型 | 1K数据量 | 5K数据量 | 10K数据量 | 50K数据量 |
+|---------|---------|---------|----------|----------|
+| 顺序写入 | 715,137 | 706,664 | 441,486  | 453,698  |
+| 随机写入 | 303,479 | 573,723 | 393,951  | 453,400  |
+
+### 读取性能 (ops/sec)
+| 读取量 | 吞吐量 | 命中率 |
+|--------|-------|--------|
+| 1,000  | 3,399 | 100%   |
+| 5,000  | 3,475 | 100%   |
+| 10,000 | 3,533 | 100%   |
+
+### 混合工作负载 (70%读 + 30%写)
+- **总操作数**: 20,000
+- **整体吞吐量**: 4,473 ops/sec  
+- **读操作**: 14,092 (命中率: 100%)
+- **写操作**: 5,908
+
+### 延迟分布 (微秒)
+- **平均延迟**: 1.8μs
+- **中位数**: 1.3μs  
+- **P95**: 1.5μs
+- **P99**: 1.9μs
+- **最大延迟**: 4,248.3μs
+
+### 批量加载性能
+- **数据量**: 100,000 条记录
+- **平均吞吐量**: 413,902 ops/sec
+- **总耗时**: 241.60ms
+
+### MemTable刷盘影响
+- **正常场景**: ~400K ops/sec
+- **频繁刷盘**: 72,210 ops/sec (MemTable大小=100)
+- **性能下降**: ~82% (由于频繁磁盘I/O)
+
+### 性能特征总结
+✅ **写优化设计**: 写入性能达到40万ops/sec级别  
+✅ **低延迟写入**: 平均1.8微秒，99%请求在2微秒内完成  
+✅ **可预测性能**: 大数据量下性能保持稳定  
+⚠️ **读性能权衡**: 读取性能约为写入的1/100，符合LSM Tree特性  
+
+## 使用指南
+
+### 1. 基本集成
+
+#### 添加依赖
+将项目作为依赖添加到你的Maven项目：
+
+```xml
+<dependency>
+    <groupId>com.brianxiadong</groupId>
+    <artifactId>lsm-tree</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+或者直接下载源码：
+```bash
+git clone https://github.com/brianxiadong/java-lsm-tree.git
+mvn clean install
+```
+
+#### 最简使用
+```java
+import com.brianxiadong.lsmtree.LSMTree;
+
+public class QuickStart {
+    public static void main(String[] args) throws Exception {
+        // 创建LSM Tree (数据目录: "./data", MemTable最大1000条)
+        try (LSMTree db = new LSMTree("./data", 1000)) {
+            // 基础操作
+            db.put("user:1001", "Alice");
+            db.put("user:1002", "Bob");
+            
+            String user = db.get("user:1001"); // "Alice"
+            db.delete("user:1002");
+            
+            System.out.println("用户信息: " + user);
+        } // 自动关闭，释放资源
+    }
+}
+```
+
+### 2. 配置优化
+
+#### 性能调优参数
+```java
+// 根据应用场景调整MemTable大小
+LSMTree highWriteDB = new LSMTree("./high_write", 50000);  // 高写入场景
+LSMTree lowLatencyDB = new LSMTree("./low_latency", 1000); // 低延迟场景
+LSMTree balancedDB = new LSMTree("./balanced", 10000);     // 平衡场景
+```
+
+#### MemTable大小选择指南
+- **小MemTable (1K-5K)**: 低内存占用，但频繁刷盘
+- **中等MemTable (10K-20K)**: 平衡内存和性能
+- **大MemTable (50K+)**: 高写入吞吐量，需要更多内存
+
+### 3. 实际应用场景
+
+#### 缓存系统
+```java
+public class CacheService {
+    private final LSMTree cache;
+    
+    public CacheService() throws IOException {
+        this.cache = new LSMTree("./cache", 20000);
+    }
+    
+    public void put(String key, String value, long ttl) throws IOException {
+        // 添加TTL信息到value中
+        String valueWithTTL = value + "|" + (System.currentTimeMillis() + ttl);
+        cache.put(key, valueWithTTL);
+    }
+    
+    public String get(String key) throws IOException {
+        String value = cache.get(key);
+        if (value == null) return null;
+        
+        // 检查TTL
+        String[] parts = value.split("\\|");
+        if (parts.length == 2) {
+            long expiry = Long.parseLong(parts[1]);
+            if (System.currentTimeMillis() > expiry) {
+                cache.delete(key); // 过期删除
+                return null;
+            }
+            return parts[0];
+        }
+        return value;
+    }
+}
+```
+
+#### 时序数据存储
+```java
+public class TimeSeriesDB {
+    private final LSMTree tsdb;
+    
+    public TimeSeriesDB() throws IOException {
+        this.tsdb = new LSMTree("./timeseries", 100000); // 大MemTable适合时序数据
+    }
+    
+    public void recordMetric(String metric, double value) throws IOException {
+        String key = metric + ":" + System.currentTimeMillis();
+        tsdb.put(key, String.valueOf(value));
+    }
+    
+    public void recordEvent(String event, String data) throws IOException {
+        String key = "event:" + System.currentTimeMillis() + ":" + event;
+        tsdb.put(key, data);
+    }
+}
+```
+
+#### 用户会话存储
+```java
+public class SessionStore {
+    private final LSMTree sessions;
+    
+    public SessionStore() throws IOException {
+        this.sessions = new LSMTree("./sessions", 10000);
+    }
+    
+    public void createSession(String sessionId, String userId, Map<String, String> attributes) throws IOException {
+        // 将属性序列化为JSON或简单格式
+        StringBuilder value = new StringBuilder(userId);
+        for (Map.Entry<String, String> entry : attributes.entrySet()) {
+            value.append("|").append(entry.getKey()).append("=").append(entry.getValue());
+        }
+        sessions.put(sessionId, value.toString());
+    }
+    
+    public String getSessionUser(String sessionId) throws IOException {
+        String session = sessions.get(sessionId);
+        return session != null ? session.split("\\|")[0] : null;
+    }
+    
+    public void invalidateSession(String sessionId) throws IOException {
+        sessions.delete(sessionId);
+    }
+}
+```
+
+### 4. 监控和维护
+
+#### 性能监控
+```java
+public void monitorPerformance(LSMTree db) throws IOException {
+    // 定期获取统计信息
+    LSMTree.LSMTreeStats stats = db.getStats();
+    
+    System.out.println("活跃MemTable条目: " + stats.getActiveMemTableSize());
+    System.out.println("不可变MemTable数量: " + stats.getImmutableMemTableCount());
+    System.out.println("SSTable文件数量: " + stats.getSsTableCount());
+    
+    // 监控指标
+    if (stats.getSsTableCount() > 50) {
+        System.out.println("警告: SSTable文件过多，考虑手动压缩");
+    }
+    
+    if (stats.getActiveMemTableSize() > 0.8 * memTableMaxSize) {
+        System.out.println("提示: MemTable即将满，准备刷盘");
+    }
+}
+```
+
+#### 手动维护操作
+```java
+public void maintenance(LSMTree db) throws IOException {
+    // 强制刷盘 - 在关键时刻确保数据持久化
+    db.flush();
+    
+    // 获取详细统计 - 用于性能调优
+    LSMTree.LSMTreeStats stats = db.getStats();
+    logStats(stats);
+}
+
+private void logStats(LSMTree.LSMTreeStats stats) {
+    System.out.printf("LSM Tree状态 - 活跃: %d, 不可变: %d, SSTable: %d%n",
+        stats.getActiveMemTableSize(),
+        stats.getImmutableMemTableCount(), 
+        stats.getSsTableCount());
+}
+```
+
+### 5. 最佳实践
+
+#### 错误处理
+```java
+public class SafeLSMWrapper {
+    private LSMTree db;
+    private final String dataDir;
+    
+    public SafeLSMWrapper(String dataDir, int memTableSize) {
+        this.dataDir = dataDir;
+        initDB(memTableSize);
+    }
+    
+    private void initDB(int memTableSize) {
+        try {
+            this.db = new LSMTree(dataDir, memTableSize);
+        } catch (IOException e) {
+            System.err.println("LSM Tree初始化失败: " + e.getMessage());
+            // 实现重试逻辑或使用备用方案
+        }
+    }
+    
+    public boolean safePut(String key, String value) {
+        try {
+            db.put(key, value);
+            return true;
+        } catch (IOException e) {
+            System.err.println("写入失败: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    public String safeGet(String key) {
+        try {
+            return db.get(key);
+        } catch (IOException e) {
+            System.err.println("读取失败: " + e.getMessage());
+            return null;
+        }
+    }
+}
+```
+
+#### 资源管理
+```java
+// 推荐: 使用try-with-resources
+try (LSMTree db = new LSMTree("./data", 10000)) {
+    // 使用数据库
+    performOperations(db);
+} // 自动关闭
+
+// 或手动管理
+LSMTree db = null;
+try {
+    db = new LSMTree("./data", 10000);
+    performOperations(db);
+} finally {
+    if (db != null) {
+        try {
+            db.close();
+        } catch (IOException e) {
+            System.err.println("关闭数据库失败: " + e.getMessage());
+        }
+    }
+}
+```
+
 ## 核心组件详解
 
 ### 1. KeyValue
