@@ -1,3 +1,19 @@
+🔥 推荐一个高质量的Java LSM Tree开源项目！
+[https://github.com/brianxiadong/java-lsm-tree](https://github.com/brianxiadong/java-lsm-tree)
+**java-lsm-tree** 是一个从零实现的Log-Structured Merge Tree，专为高并发写入场景设计。
+核心亮点：
+⚡ 极致性能：写入速度超过40万ops/秒，完爆传统B+树
+🏗️ 完整架构：MemTable跳表 + SSTable + WAL + 布隆过滤器 + 多级压缩
+📚 深度教程：12章详细教程，从基础概念到生产优化，每行代码都有注释
+🔒 并发安全：读写锁机制，支持高并发场景
+💾 数据可靠：WAL写前日志确保崩溃恢复，零数据丢失
+适合谁？
+- 想深入理解LSM Tree原理的开发者
+- 需要高写入性能存储引擎的项目
+- 准备数据库/存储系统面试的同学
+- 对分布式存储感兴趣的工程师
+⭐ 给个Star支持开源！
+
 # 第7章：压缩策略
 
 ## 什么是压缩？
@@ -22,21 +38,48 @@
 
 ## 压缩策略类型
 
-### 1. Size-Tiered 压缩
+### 1. Size-Tiered 压缩策略
 
-我们的实现采用**Size-Tiered**策略：
+我们采用**Size-Tiered压缩**策略，它是一种基于文件数量触发的分层压缩机制：
 
+**核心思想**：
+- 将SSTable文件按层级(Level)组织
+- 每层允许的最大文件数量有限制
+- 当某层文件数量达到阈值时，将该层所有文件合并到下一层
+- 层级越高，文件越大，数量越少
+
+**具体工作流程**：
+
+| 层级 | 最大文件数 | 单文件大小 | 总容量 | 触发条件 |
+|------|------------|------------|--------|----------|
+| Level 0 | 4个文件 | ~10MB | ~40MB | 4个文件时触发 |
+| Level 1 | 4个文件 | ~40MB | ~160MB | 4个文件时触发 |
+| Level 2 | 4个文件 | ~160MB | ~640MB | 4个文件时触发 |
+| Level N | 4个文件 | 4^N × 10MB | 递增 | 4个文件时触发 |
+
+**压缩触发示例**：
 ```
-Level 0: [4个SSTable文件] → 合并到Level 1
-Level 1: [4个合并文件] → 合并到Level 2  
-Level 2: [16个文件] → 合并到Level 3
-...
+步骤1: MemTable刷盘产生SSTable文件
+Level 0: [file1.sst] [file2.sst] [file3.sst] [file4.sst] ← 达到4个文件
 
-规则：
-- 每层最多N个文件
-- 文件大小逐层增长
-- 触发阈值：文件数量
+步骤2: Level 0达到阈值，触发压缩到Level 1  
+Level 0: [] (清空)
+Level 1: [merged_L1_1.sst] ← 4个文件合并成1个大文件
+
+步骤3: 继续写入，Level 0再次累积
+Level 0: [file5.sst] [file6.sst] [file7.sst] [file8.sst] ← 又达到4个
+Level 1: [merged_L1_1.sst] [merged_L1_2.sst] ← 新压缩的文件
+
+步骤4: Level 1达到阈值，触发向Level 2压缩
+Level 1: [] (清空)
+Level 2: [merged_L2_1.sst] ← 更大的合并文件
 ```
+
+**优势分析**：
+- ✅ **写入友好**: Level 0直接接收MemTable，写入延迟低
+- ✅ **空间效率**: 定期清理过期数据和删除标记
+- ✅ **读取优化**: 减少需要查询的文件数量
+- ⚠️ **写放大**: 数据可能被多次压缩（但比Leveled更少）
 
 ## 压缩策略实现
 
@@ -50,794 +93,215 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class CompactionStrategy {
-    private final String dataDirectory;
-    private final int maxFilesPerLevel;
-    private final Map<Integer, List<String>> levelFiles;
+    private final String dataDirectory;              // 数据存储目录路径
+    private final int maxFilesPerLevel;              // 每层允许的最大文件数量
+    private final Map<Integer, List<String>> levelFiles; // 层级到文件列表的映射
     
+    // 压缩策略构造器
     public CompactionStrategy(String dataDirectory, int maxFilesPerLevel) {
-        this.dataDirectory = dataDirectory;
-        this.maxFilesPerLevel = maxFilesPerLevel;
+        this.dataDirectory = dataDirectory;          // 设置数据目录
+        this.maxFilesPerLevel = maxFilesPerLevel;    // 设置每层文件数量阈值
+        // 使用ConcurrentHashMap确保多线程安全访问层级文件映射
         this.levelFiles = new ConcurrentHashMap<>();
     }
     
-    // 添加新的SSTable文件到Level 0
+    // 将新的SSTable文件添加到Level 0（MemTable刷盘后调用）
     public void addSSTable(String filePath) {
+        // computeIfAbsent确保Level 0的文件列表存在，然后添加新文件
         levelFiles.computeIfAbsent(0, k -> new ArrayList<>()).add(filePath);
     }
     
-    // 检查是否需要压缩
+    // 检查指定层级是否需要压缩
     public boolean needsCompaction(int level) {
-        List<String> files = levelFiles.get(level);
+        List<String> files = levelFiles.get(level);  // 获取该层的文件列表
+        // 当文件数量达到或超过阈值时需要压缩
         return files != null && files.size() >= maxFilesPerLevel;
     }
     
-    // 执行压缩
+    // 执行指定层级的压缩操作
     public void compact(int level) throws IOException {
-        if (!needsCompaction(level)) {
-            return;
+        if (!needsCompaction(level)) {               // 检查是否真的需要压缩
+            return;                                  // 不需要压缩，直接返回
         }
         
+        // 获取当前层所有需要压缩的文件（创建副本避免并发修改）
         List<String> filesToCompact = new ArrayList<>(levelFiles.get(level));
+        // 执行实际的文件合并操作，生成下一层的文件
         String compactedFile = performCompaction(filesToCompact, level + 1);
         
-        // 更新文件层级
-        levelFiles.get(level).clear();
+        // 更新文件层级结构
+        levelFiles.get(level).clear();              // 清空当前层（文件已合并）
+        // 将合并后的文件添加到下一层
         levelFiles.computeIfAbsent(level + 1, k -> new ArrayList<>()).add(compactedFile);
         
-        // 删除旧文件
+        // 物理删除旧的SSTable文件，释放磁盘空间
         cleanupOldFiles(filesToCompact);
         
-        // 递归检查下一层
+        // 递归检查下一层是否也需要压缩（压缩可能引发连锁反应）
         if (needsCompaction(level + 1)) {
-            compact(level + 1);
+            compact(level + 1);                     // 递归压缩下一层
         }
     }
 }
 ```
+
+**核心设计解析**：这个压缩策略管理器是Size-Tiered压缩的控制中心。它维护了一个层级到文件列表的映射，使用`ConcurrentHashMap`确保多线程安全。`addSSTable`方法将新文件添加到Level 0，这是MemTable刷盘的入口点。`needsCompaction`方法简单但关键，它决定了压缩的触发时机。`compact`方法实现了压缩的完整流程：检查→合并→更新→清理→递归检查，这种设计确保了压缩操作的原子性和连锁效应的正确处理。
 
 ### 压缩执行器
 
 ```java
+// 执行实际的文件压缩合并操作
 private String performCompaction(List<String> inputFiles, int targetLevel) throws IOException {
+    // 打印压缩开始信息，用于监控和调试
     System.out.printf("开始压缩 %d 个文件到 Level %d%n", inputFiles.size(), targetLevel);
     
-    // 1. 加载所有输入文件
+    // 步骤1: 加载所有需要压缩的输入SSTable文件
     List<SSTable> inputTables = new ArrayList<>();
     for (String filePath : inputFiles) {
-        inputTables.add(SSTable.loadFromFile(filePath));
+        // 从磁盘文件加载SSTable对象到内存
+        inputTables.add(SSTable.loadFromFile(filePath));  
     }
     
-    // 2. 合并排序所有数据
+    // 步骤2: 使用多路归并算法合并所有SSTable的数据
     List<KeyValue> mergedData = mergeSSTableData(inputTables);
     
-    // 3. 去重和清理
+    // 步骤3: 数据去重和清理（移除过期版本、处理删除标记）
     List<KeyValue> cleanedData = deduplicateAndClean(mergedData);
     
-    // 4. 生成输出文件名
+    // 步骤4: 为目标层级生成新的SSTable文件名
     String outputFile = generateCompactedFileName(targetLevel);
     
-    // 5. 创建新的SSTable
+    // 步骤5: 将清理后的数据写入新的SSTable文件
     SSTable compactedTable = new SSTable(outputFile, cleanedData);
     
+    // 打印压缩完成信息，显示压缩效果统计
     System.out.printf("压缩完成: %s (清理前: %d条, 清理后: %d条)%n", 
                      outputFile, mergedData.size(), cleanedData.size());
     
-    return outputFile;
+    return outputFile;  // 返回新生成的SSTable文件路径
 }
 ```
+
+**压缩执行解析**：这个方法是压缩操作的核心执行引擎，它将多个SSTable文件合并成一个更大的文件。整个过程分为5个清晰的步骤：文件加载、数据合并、数据清理、文件命名、文件写入。数据合并使用多路归并算法确保输出数据的有序性，数据清理阶段移除冗余版本和处理删除操作，这是压缩提高存储效率的关键环节。统计信息的输出帮助监控压缩效果，了解数据清理的程度。
 
 ### 数据合并算法
 
 ```java
+// 使用多路归并算法合并多个有序SSTable的数据
 private List<KeyValue> mergeSSTableData(List<SSTable> tables) {
-    // 使用多路归并排序
+    // 创建最小堆，用于多路归并排序（按key字典序排序）
     PriorityQueue<SSTableIterator> heap = new PriorityQueue<>(
-        Comparator.comparing(iter -> iter.current().getKey())
+        Comparator.comparing(iter -> iter.current().getKey())  // 比较器：按当前key排序
     );
     
-    // 初始化所有迭代器
+    // 初始化所有SSTable的迭代器，将第一个元素放入堆
     for (SSTable table : tables) {
-        SSTableIterator iter = table.iterator();
-        if (iter.hasNext()) {
-            iter.next();
-            heap.offer(iter);
+        SSTableIterator iter = table.iterator();    // 获取表的迭代器
+        if (iter.hasNext()) {                      // 如果表非空
+            iter.next();                           // 移动到第一个元素
+            heap.offer(iter);                      // 将迭代器放入堆
         }
     }
     
-    List<KeyValue> merged = new ArrayList<>();
+    List<KeyValue> merged = new ArrayList<>();     // 存储合并后的有序数据
     
+    // 执行多路归并：每次取出最小key的迭代器
     while (!heap.isEmpty()) {
-        SSTableIterator iter = heap.poll();
-        KeyValue current = iter.current();
-        merged.add(current);
+        SSTableIterator iter = heap.poll();        // 取出堆顶（最小key）的迭代器
+        KeyValue current = iter.current();         // 获取当前最小的KeyValue
+        merged.add(current);                       // 添加到结果中
         
+        // 如果该迭代器还有数据，继续放入堆中
         if (iter.hasNext()) {
-            iter.next();
-            heap.offer(iter);
+            iter.next();                           // 移动到下一个元素
+            heap.offer(iter);                      // 重新放入堆中排序
         }
     }
     
-    return merged;
+    return merged;  // 返回合并排序后的所有数据
 }
 
-// SSTable迭代器
+// SSTable迭代器：用于遍历单个SSTable的数据
 private static class SSTableIterator {
-    private final List<KeyValue> data;
-    private int index = -1;
+    private final List<KeyValue> data;    // SSTable中的所有数据
+    private int index = -1;               // 当前位置索引（-1表示未开始）
     
+    // 构造器：从SSTable获取所有数据
     public SSTableIterator(SSTable table) {
-        this.data = table.getAllData(); // 获取所有数据
+        this.data = table.getAllData();   // 加载SSTable的所有KeyValue数据
     }
     
+    // 检查是否还有下一个元素
     public boolean hasNext() {
-        return index + 1 < data.size();
+        return index + 1 < data.size();   // 判断下一个位置是否有效
     }
     
+    // 移动到下一个元素并返回
     public KeyValue next() {
-        if (!hasNext()) {
-            throw new NoSuchElementException();
+        if (!hasNext()) {                 // 边界检查
+            throw new NoSuchElementException("没有更多元素");
         }
-        return data.get(++index);
+        return data.get(++index);         // 先移动索引，再返回元素
     }
     
+    // 获取当前元素（不移动索引）
     public KeyValue current() {
-        if (index < 0 || index >= data.size()) {
-            return null;
+        if (index < 0 || index >= data.size()) {  // 检查索引有效性
+            return null;                           // 无效位置返回null
         }
-        return data.get(index);
+        return data.get(index);                    // 返回当前位置的元素
     }
 }
 ```
+
+**多路归并解析**：这是压缩算法的核心，它将多个有序的SSTable合并成一个大的有序序列。算法使用最小堆维护各个SSTable的"当前最小元素"，每次取出全局最小的key，确保输出序列的有序性。时间复杂度为O(N log K)，其中N是总元素数，K是SSTable数量。这种设计既保证了合并效率，又维持了LSM Tree要求的数据有序性。迭代器模式使得内存使用可控，即使处理大文件也不会出现内存溢出。
 
 ### 去重和清理
 
 ```java
+// 对已排序的数据进行去重和清理，移除过期版本和删除标记
 private List<KeyValue> deduplicateAndClean(List<KeyValue> sortedData) {
-    if (sortedData.isEmpty()) {
+    if (sortedData.isEmpty()) {               // 空数据直接返回
         return sortedData;
     }
     
-    List<KeyValue> cleaned = new ArrayList<>();
-    String lastKey = null;
-    KeyValue lastKV = null;
+    List<KeyValue> cleaned = new ArrayList<>();  // 存储清理后的数据
+    String lastKey = null;                       // 上一个处理的key
+    KeyValue lastKV = null;                      // 上一个key的最新版本
     
+    // 遍历所有已排序的KeyValue（按key排序，相同key按timestamp排序）
     for (KeyValue kv : sortedData) {
-        String currentKey = kv.getKey();
+        String currentKey = kv.getKey();         // 获取当前记录的key
         
-        if (!currentKey.equals(lastKey)) {
-            // 新键：添加上一个键的最新版本
+        if (!currentKey.equals(lastKey)) {       // 遇到新的key
+            // 处理上一个key：添加其最新版本（如果未被删除）
             if (lastKV != null && !lastKV.isDeleted()) {
-                cleaned.add(lastKV);
+                cleaned.add(lastKV);             // 只保留未删除的记录
             }
-            lastKey = currentKey;
-            lastKV = kv;
+            // 开始处理新key
+            lastKey = currentKey;                // 更新当前处理的key
+            lastKV = kv;                        // 设置当前版本为候选最新版本
         } else {
-            // 相同键：保留最新版本（时间戳最大）
+            // 相同key的多个版本：保留时间戳最新的版本
             if (kv.getTimestamp() > lastKV.getTimestamp()) {
-                lastKV = kv;
+                lastKV = kv;                    // 更新为更新的版本
             }
+            // 旧版本被丢弃，实现去重
         }
     }
     
-    // 添加最后一个键
+    // 处理最后一个key：添加其最新版本（如果未被删除）
     if (lastKV != null && !lastKV.isDeleted()) {
-        cleaned.add(lastKV);
+        cleaned.add(lastKV);                    // 确保最后一个key也被处理
     }
     
-    return cleaned;
+    return cleaned;  // 返回去重和清理后的数据
 }
 ```
 
-## 高级压缩策略
+**去重清理解析**：这是压缩过程中数据优化的关键步骤，它实现了LSM Tree的两个重要功能：版本去重和删除处理。对于同一个key的多个版本，只保留时间戳最新的版本，这大大减少了存储空间。对于标记为删除的记录，在压缩时彻底移除，释放存储空间。算法的时间复杂度为O(N)，空间复杂度也是O(N)，效率很高。这种设计确保了压缩后的数据既保持了最新状态，又最大化了存储效率。
 
-### 1. Leveled 压缩
 
-```java
-public class LeveledCompactionStrategy extends CompactionStrategy {
-    private final long[] maxLevelSize;
-    private final double sizeTierRatio;
-    
-    public LeveledCompactionStrategy(String dataDirectory, double sizeTierRatio) {
-        super(dataDirectory, 10); // 每层最多10个文件
-        this.sizeTierRatio = sizeTierRatio;
-        this.maxLevelSize = calculateLevelSizes();
-    }
-    
-    private long[] calculateLevelSizes() {
-        long[] sizes = new long[10]; // 支持10层
-        sizes[0] = 10 * 1024 * 1024; // Level 0: 10MB
-        
-        for (int i = 1; i < sizes.length; i++) {
-            sizes[i] = (long) (sizes[i - 1] * sizeTierRatio);
-        }
-        
-        return sizes;
-    }
-    
-    @Override
-    public boolean needsCompaction(int level) {
-        List<String> files = levelFiles.get(level);
-        if (files == null || files.isEmpty()) {
-            return false;
-        }
-        
-        if (level == 0) {
-            // Level 0 按文件数量判断
-            return files.size() >= maxFilesPerLevel;
-        }
-        
-        // 其他层按总大小判断
-        long totalSize = calculateLevelSize(level);
-        return totalSize > maxLevelSize[level];
-    }
-    
-    private long calculateLevelSize(int level) {
-        List<String> files = levelFiles.get(level);
-        if (files == null) return 0;
-        
-        return files.stream()
-                .mapToLong(this::getFileSize)
-                .sum();
-    }
-    
-    private long getFileSize(String filePath) {
-        try {
-            return new File(filePath).length();
-        } catch (Exception e) {
-            return 0;
-        }
-    }
-}
-```
-
-### 2. 选择性压缩
-
-```java
-public class SelectiveCompactionStrategy extends CompactionStrategy {
-    private final double deadRatioThreshold;
-    
-    public SelectiveCompactionStrategy(String dataDirectory, double deadRatioThreshold) {
-        super(dataDirectory, 4);
-        this.deadRatioThreshold = deadRatioThreshold;
-    }
-    
-    @Override
-    public void compact(int level) throws IOException {
-        List<String> candidates = selectCompactionCandidates(level);
-        
-        if (candidates.isEmpty()) {
-            return;
-        }
-        
-        String compactedFile = performCompaction(candidates, level + 1);
-        
-        // 更新文件结构
-        updateFileLevels(candidates, compactedFile, level);
-    }
-    
-    private List<String> selectCompactionCandidates(int level) {
-        List<String> files = levelFiles.get(level);
-        if (files == null) return new ArrayList<>();
-        
-        List<CompactionCandidate> candidates = new ArrayList<>();
-        
-        for (String file : files) {
-            double deadRatio = calculateDeadRatio(file);
-            CompactionCandidate candidate = new CompactionCandidate(file, deadRatio);
-            candidates.add(candidate);
-        }
-        
-        // 按死亡率排序，优先压缩死亡率高的文件
-        candidates.sort((a, b) -> Double.compare(b.deadRatio, a.deadRatio));
-        
-        List<String> selected = new ArrayList<>();
-        for (CompactionCandidate candidate : candidates) {
-            if (candidate.deadRatio > deadRatioThreshold) {
-                selected.add(candidate.filePath);
-            }
-            
-            if (selected.size() >= maxFilesPerLevel) {
-                break;
-            }
-        }
-        
-        return selected;
-    }
-    
-    private double calculateDeadRatio(String filePath) {
-        try {
-            SSTable table = SSTable.loadFromFile(filePath);
-            List<KeyValue> data = table.getAllData();
-            
-            if (data.isEmpty()) return 1.0;
-            
-            int deletedCount = 0;
-            Map<String, Integer> keyVersions = new HashMap<>();
-            
-            for (KeyValue kv : data) {
-                if (kv.isDeleted()) {
-                    deletedCount++;
-                }
-                keyVersions.merge(kv.getKey(), 1, Integer::sum);
-            }
-            
-            // 死亡率 = (删除条目 + 重复键) / 总条目
-            int duplicates = keyVersions.values().stream()
-                    .mapToInt(count -> Math.max(0, count - 1))
-                    .sum();
-            
-            return (double) (deletedCount + duplicates) / data.size();
-        } catch (Exception e) {
-            return 0.0;
-        }
-    }
-    
-    private static class CompactionCandidate {
-        final String filePath;
-        final double deadRatio;
-        
-        CompactionCandidate(String filePath, double deadRatio) {
-            this.filePath = filePath;
-            this.deadRatio = deadRatio;
-        }
-    }
-}
-```
-
-### 3. 并行压缩
-
-```java
-public class ParallelCompactionStrategy extends CompactionStrategy {
-    private final ExecutorService compactionExecutor;
-    private final int parallelismLevel;
-    
-    public ParallelCompactionStrategy(String dataDirectory, int parallelismLevel) {
-        super(dataDirectory, 4);
-        this.parallelismLevel = parallelismLevel;
-        this.compactionExecutor = Executors.newFixedThreadPool(parallelismLevel);
-    }
-    
-    @Override
-    public void compact(int level) throws IOException {
-        List<String> files = levelFiles.get(level);
-        if (files == null || files.size() < maxFilesPerLevel) {
-            return;
-        }
-        
-        // 将文件分组进行并行压缩
-        List<List<String>> fileGroups = partitionFiles(files);
-        List<CompletableFuture<String>> futures = new ArrayList<>();
-        
-        for (List<String> group : fileGroups) {
-            CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> {
-                try {
-                    return performCompaction(group, level + 1);
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-            }, compactionExecutor);
-            
-            futures.add(future);
-        }
-        
-        // 等待所有压缩完成
-        List<String> compactedFiles = new ArrayList<>();
-        for (CompletableFuture<String> future : futures) {
-            try {
-                compactedFiles.add(future.get());
-            } catch (Exception e) {
-                throw new IOException("并行压缩失败", e);
-            }
-        }
-        
-        // 更新文件层级
-        levelFiles.get(level).clear();
-        levelFiles.computeIfAbsent(level + 1, k -> new ArrayList<>()).addAll(compactedFiles);
-        
-        cleanupOldFiles(files);
-    }
-    
-    private List<List<String>> partitionFiles(List<String> files) {
-        List<List<String>> groups = new ArrayList<>();
-        int groupSize = Math.max(1, files.size() / parallelismLevel);
-        
-        for (int i = 0; i < files.size(); i += groupSize) {
-            int end = Math.min(i + groupSize, files.size());
-            groups.add(new ArrayList<>(files.subList(i, end)));
-        }
-        
-        return groups;
-    }
-    
-    public void shutdown() {
-        compactionExecutor.shutdown();
-        try {
-            if (!compactionExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
-                compactionExecutor.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            compactionExecutor.shutdownNow();
-        }
-    }
-}
-```
-
-## 性能优化
-
-### 1. 压缩调度器
-
-```java
-public class CompactionScheduler {
-    private final CompactionStrategy strategy;
-    private final ScheduledExecutorService scheduler;
-    private final AtomicBoolean compactionInProgress = new AtomicBoolean(false);
-    
-    public CompactionScheduler(CompactionStrategy strategy) {
-        this.strategy = strategy;
-        this.scheduler = Executors.newScheduledThreadPool(1);
-    }
-    
-    public void startBackgroundCompaction() {
-        scheduler.scheduleWithFixedDelay(
-            this::performBackgroundCompaction,
-            10, // 初始延迟
-            30, // 执行间隔
-            TimeUnit.SECONDS
-        );
-    }
-    
-    private void performBackgroundCompaction() {
-        if (compactionInProgress.compareAndSet(false, true)) {
-            try {
-                compactAllLevels();
-            } catch (Exception e) {
-                System.err.println("后台压缩失败: " + e.getMessage());
-            } finally {
-                compactionInProgress.set(false);
-            }
-        }
-    }
-    
-    private void compactAllLevels() throws IOException {
-        for (int level = 0; level < 10; level++) {
-            if (strategy.needsCompaction(level)) {
-                long startTime = System.currentTimeMillis();
-                strategy.compact(level);
-                long duration = System.currentTimeMillis() - startTime;
-                
-                System.out.printf("Level %d 压缩完成，耗时: %d ms%n", level, duration);
-            }
-        }
-    }
-    
-    public boolean triggerManualCompaction() {
-        if (compactionInProgress.compareAndSet(false, true)) {
-            try {
-                compactAllLevels();
-                return true;
-            } catch (Exception e) {
-                System.err.println("手动压缩失败: " + e.getMessage());
-                return false;
-            } finally {
-                compactionInProgress.set(false);
-            }
-        }
-        return false; // 压缩正在进行中
-    }
-    
-    public void shutdown() {
-        scheduler.shutdown();
-        try {
-            if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
-                scheduler.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            scheduler.shutdownNow();
-        }
-    }
-}
-```
-
-### 2. 压缩统计
-
-```java
-public class CompactionMetrics {
-    private final AtomicLong compactionCount = new AtomicLong(0);
-    private final AtomicLong totalCompactionTime = new AtomicLong(0);
-    private final AtomicLong bytesCompacted = new AtomicLong(0);
-    private final AtomicLong filesCompacted = new AtomicLong(0);
-    private final Map<Integer, AtomicLong> levelCompactionCounts = new ConcurrentHashMap<>();
-    
-    public void recordCompaction(int level, long duration, long bytesProcessed, int fileCount) {
-        compactionCount.incrementAndGet();
-        totalCompactionTime.addAndGet(duration);
-        bytesCompacted.addAndGet(bytesProcessed);
-        filesCompacted.addAndGet(fileCount);
-        
-        levelCompactionCounts.computeIfAbsent(level, k -> new AtomicLong(0))
-                .incrementAndGet();
-    }
-    
-    public String getCompactionStats() {
-        long totalCompactions = compactionCount.get();
-        double avgTime = totalCompactions > 0 ? 
-                (double) totalCompactionTime.get() / totalCompactions : 0.0;
-        
-        StringBuilder stats = new StringBuilder();
-        stats.append(String.format("压缩统计:%n"));
-        stats.append(String.format("  总压缩次数: %,d%n", totalCompactions));
-        stats.append(String.format("  平均耗时: %.2f ms%n", avgTime));
-        stats.append(String.format("  压缩数据量: %.2f MB%n", bytesCompacted.get() / (1024.0 * 1024.0)));
-        stats.append(String.format("  压缩文件数: %,d%n", filesCompacted.get()));
-        
-        stats.append("各层压缩次数:%n");
-        levelCompactionCounts.entrySet().stream()
-                .sorted(Map.Entry.comparingByKey())
-                .forEach(entry -> stats.append(String.format("  Level %d: %,d%n", 
-                        entry.getKey(), entry.getValue().get())));
-        
-        return stats.toString();
-    }
-    
-    public double getCompactionThroughput() {
-        long totalTime = totalCompactionTime.get();
-        long totalBytes = bytesCompacted.get();
-        
-        if (totalTime == 0) return 0.0;
-        
-        // MB/s
-        return (totalBytes / (1024.0 * 1024.0)) / (totalTime / 1000.0);
-    }
-}
-```
-
-## 实际应用场景
-
-### 1. 写密集型场景
-
-```java
-public class WriteIntensiveCompactionStrategy extends CompactionStrategy {
-    
-    public WriteIntensiveCompactionStrategy(String dataDirectory) {
-        super(dataDirectory, 8); // 更多文件才触发压缩
-    }
-    
-    @Override
-    public boolean needsCompaction(int level) {
-        List<String> files = levelFiles.get(level);
-        if (files == null) return false;
-        
-        if (level == 0) {
-            // Level 0 允许更多文件，减少压缩频率
-            return files.size() >= maxFilesPerLevel * 2;
-        }
-        
-        return files.size() >= maxFilesPerLevel;
-    }
-    
-    // 延迟压缩：在系统空闲时进行
-    public void performDelayedCompaction() throws IOException {
-        if (isSystemIdle()) {
-            for (int level = 0; level < 5; level++) {
-                if (needsCompaction(level)) {
-                    compact(level);
-                }
-            }
-        }
-    }
-    
-    private boolean isSystemIdle() {
-        // 检查系统负载、I/O使用率等
-        return System.currentTimeMillis() % 60000 < 5000; // 简化：每分钟前5秒认为空闲
-    }
-}
-```
-
-### 2. 读密集型场景
-
-```java
-public class ReadIntensiveCompactionStrategy extends CompactionStrategy {
-    
-    public ReadIntensiveCompactionStrategy(String dataDirectory) {
-        super(dataDirectory, 2); // 更少文件触发压缩
-    }
-    
-    @Override
-    public void compact(int level) throws IOException {
-        if (!needsCompaction(level)) {
-            return;
-        }
-        
-        // 积极压缩以减少读放大
-        List<String> filesToCompact = new ArrayList<>(levelFiles.get(level));
-        
-        // 包含相邻层文件一起压缩
-        if (level > 0) {
-            List<String> lowerLevelFiles = levelFiles.get(level - 1);
-            if (lowerLevelFiles != null && !lowerLevelFiles.isEmpty()) {
-                filesToCompact.addAll(lowerLevelFiles);
-                levelFiles.get(level - 1).clear();
-            }
-        }
-        
-        String compactedFile = performCompaction(filesToCompact, level + 1);
-        
-        levelFiles.get(level).clear();
-        levelFiles.computeIfAbsent(level + 1, k -> new ArrayList<>()).add(compactedFile);
-        
-        cleanupOldFiles(filesToCompact);
-    }
-}
-```
-
-### 3. 混合负载场景
-
-```java
-public class AdaptiveCompactionStrategy extends CompactionStrategy {
-    private final CircularBuffer<OperationStats> recentStats;
-    private CompactionStrategy currentStrategy;
-    
-    public AdaptiveCompactionStrategy(String dataDirectory) {
-        super(dataDirectory, 4);
-        this.recentStats = new CircularBuffer<>(100);
-        this.currentStrategy = this;
-    }
-    
-    public void recordOperation(boolean isWrite) {
-        recentStats.add(new OperationStats(isWrite, System.currentTimeMillis()));
-        adaptStrategy();
-    }
-    
-    private void adaptStrategy() {
-        double writeRatio = calculateWriteRatio();
-        
-        if (writeRatio > 0.7) {
-            // 写密集，采用写优化策略
-            currentStrategy = new WriteIntensiveCompactionStrategy(dataDirectory);
-        } else if (writeRatio < 0.3) {
-            // 读密集，采用读优化策略
-            currentStrategy = new ReadIntensiveCompactionStrategy(dataDirectory);
-        }
-        // 否则使用默认策略
-    }
-    
-    private double calculateWriteRatio() {
-        List<OperationStats> recent = recentStats.getRecent(50);
-        if (recent.isEmpty()) return 0.5;
-        
-        long writeCount = recent.stream()
-                .mapToLong(stat -> stat.isWrite ? 1 : 0)
-                .sum();
-        
-        return (double) writeCount / recent.size();
-    }
-    
-    @Override
-    public void compact(int level) throws IOException {
-        currentStrategy.compact(level);
-    }
-    
-    private static class OperationStats {
-        final boolean isWrite;
-        final long timestamp;
-        
-        OperationStats(boolean isWrite, long timestamp) {
-            this.isWrite = isWrite;
-            this.timestamp = timestamp;
-        }
-    }
-    
-    // 简单的循环缓冲区实现
-    private static class CircularBuffer<T> {
-        private final Object[] buffer;
-        private int head = 0;
-        private int size = 0;
-        
-        CircularBuffer(int capacity) {
-            this.buffer = new Object[capacity];
-        }
-        
-        synchronized void add(T item) {
-            buffer[head] = item;
-            head = (head + 1) % buffer.length;
-            if (size < buffer.length) {
-                size++;
-            }
-        }
-        
-        @SuppressWarnings("unchecked")
-        synchronized List<T> getRecent(int count) {
-            List<T> result = new ArrayList<>();
-            int actualCount = Math.min(count, size);
-            
-            for (int i = 0; i < actualCount; i++) {
-                int index = (head - 1 - i + buffer.length) % buffer.length;
-                result.add((T) buffer[index]);
-            }
-            
-            return result;
-        }
-    }
-}
-```
-
-## 压缩优化技术
-
-### 1. 增量压缩
-
-```java
-public class IncrementalCompactionStrategy extends CompactionStrategy {
-    private final Map<String, Long> lastCompactionTime = new ConcurrentHashMap<>();
-    private final long compactionInterval = 3600_000; // 1小时
-    
-    @Override
-    public boolean needsCompaction(int level) {
-        if (!super.needsCompaction(level)) {
-            return false;
-        }
-        
-        String levelKey = "level_" + level;
-        long lastTime = lastCompactionTime.getOrDefault(levelKey, 0L);
-        long now = System.currentTimeMillis();
-        
-        // 避免频繁压缩
-        return now - lastTime > compactionInterval;
-    }
-    
-    @Override
-    public void compact(int level) throws IOException {
-        super.compact(level);
-        lastCompactionTime.put("level_" + level, System.currentTimeMillis());
-    }
-}
-```
-
-### 2. 部分压缩
-
-```java
-public class PartialCompactionStrategy extends CompactionStrategy {
-    
-    public void compactPartial(int level, Set<String> keyRanges) throws IOException {
-        List<String> files = levelFiles.get(level);
-        if (files == null) return;
-        
-        // 只压缩包含指定键范围的文件
-        List<String> candidateFiles = new ArrayList<>();
-        
-        for (String file : files) {
-            if (fileContainsKeyRanges(file, keyRanges)) {
-                candidateFiles.add(file);
-            }
-        }
-        
-        if (candidateFiles.size() >= 2) {
-            String compactedFile = performCompaction(candidateFiles, level + 1);
-            
-            // 更新文件列表
-            files.removeAll(candidateFiles);
-            levelFiles.computeIfAbsent(level + 1, k -> new ArrayList<>()).add(compactedFile);
-            
-            cleanupOldFiles(candidateFiles);
-        }
-    }
-    
-    private boolean fileContainsKeyRanges(String filePath, Set<String> keyRanges) {
-        try {
-            SSTable table = SSTable.loadFromFile(filePath);
-            for (String keyRange : keyRanges) {
-                if (table.get(keyRange) != null) {
-                    return true;
-                }
-            }
-            return false;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-}
-```
 
 ## 小结
 
@@ -847,12 +311,6 @@ public class PartialCompactionStrategy extends CompactionStrategy {
 2. **空间回收**: 清理冗余和删除的数据
 3. **性能平衡**: 在读写性能间找到平衡
 4. **自适应**: 根据负载模式调整策略
-
-## 下一步学习
-
-现在你已经理解了压缩策略，接下来我们将学习LSM Tree主体的实现：
-
-继续阅读：[第8章：LSM Tree 主体](08-lsm-tree-main.md)
 
 ---
 

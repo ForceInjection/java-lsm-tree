@@ -1,3 +1,19 @@
+🔥 推荐一个高质量的Java LSM Tree开源项目！
+[https://github.com/brianxiadong/java-lsm-tree](https://github.com/brianxiadong/java-lsm-tree)
+**java-lsm-tree** 是一个从零实现的Log-Structured Merge Tree，专为高并发写入场景设计。
+核心亮点：
+⚡ 极致性能：写入速度超过40万ops/秒，完爆传统B+树
+🏗️ 完整架构：MemTable跳表 + SSTable + WAL + 布隆过滤器 + 多级压缩
+📚 深度教程：12章详细教程，从基础概念到生产优化，每行代码都有注释
+🔒 并发安全：读写锁机制，支持高并发场景
+💾 数据可靠：WAL写前日志确保崩溃恢复，零数据丢失
+适合谁？
+- 想深入理解LSM Tree原理的开发者
+- 需要高写入性能存储引擎的项目
+- 准备数据库/存储系统面试的同学
+- 对分布式存储感兴趣的工程师
+⭐ 给个Star支持开源！
+
 # 第3章：MemTable 内存表
 
 ## 什么是MemTable？
@@ -66,13 +82,45 @@ public class MemTable {
 ### 跳表结构图解
 
 ```
-Level 3: [1] -----------------> [17] ----------> NULL
-Level 2: [1] --------> [9] ----> [17] ----------> NULL
-Level 1: [1] -> [4] -> [9] ----> [17] -> [25] -> NULL
-Level 0: [1] -> [4] -> [9] -> [12] -> [17] -> [25] -> NULL
-           ^
-         查找12
+跳表查找12的真实路径演示:
+
+Level 3: [1]--------①水平-------->[17]---------> NULL
+          |                        (17>12停止)
+          |②下降
+          ↓
+Level 2: [1]---③水平--->[9]---④水平--->[17]-------> NULL
+                        |             (17>12停止)  
+                        |⑤下降到Level 1
+                        ↓
+Level 1: [1]-->[4]----->[9]------->[17]-->[25]---> NULL
+                        |⑥检查      (下个是17>12，无需水平移动)
+                        |⑦下降到Level 0  
+                        ↓
+Level 0: [1]-->[4]----->[9]--⑧找到-->[12🎯]-->[17]-->[25]---> NULL
+                                     (找到目标!)
+
+真实搜索路径: 1(L3) → 1(L2) → 9(L2) → 9(L1) → 9(L0) → 12(L0) ✓
+关键洞察: Level 1并未被"跳过"，而是在此处做了快速判断后继续下降
+跳表精髓: 通过多层索引快速"跳过"不必要的节点比较，而非跳过层级
 ```
+
+**跳表结构说明**: 跳表通过多层索引实现快速查找。上层作为下层的"快速通道"，每个节点在多个层级上建立索引。查找时从顶层开始，利用稀疏索引快速逼近目标，然后逐层下降精确定位。
+
+**查找12的完整路径(按编号顺序)**:
+1. **①水平**: Level 3从1开始，向右到17 (17>12，停止水平移动)
+2. **②下降**: 从Level 3的1下降到Level 2的1  
+3. **③水平**: Level 2从1向右到9 (9<12，继续)
+4. **④水平**: Level 2从9向右到17 (17>12，停止水平移动)
+5. **⑤下降**: 从Level 2的9下降到Level 1的9
+6. **Level 1检查**: 在Level 1的9处，下一个节点是17 (17>12，无需水平移动)
+7. **继续下降**: 从Level 1的9下降到Level 0的9  
+8. **⑥找到**: Level 0从9向右到12🎯 (找到目标！)
+
+**为什么看起来"跳过"了Level 1？**
+- 实际上算法会**逐层检查每一层**，不会真的跳过
+- 在Level 1的节点9处，发现下一个节点是17>12，所以无需水平移动
+- 但算法仍然会**在Level 1停留并做判断**，然后继续下降
+- 这就是为什么跳表叫"Skip List"——它能"跳过"不必要的比较，而不是跳过层级
 
 ### 查找过程
 
@@ -80,6 +128,12 @@ Level 0: [1] -> [4] -> [9] -> [12] -> [17] -> [25] -> NULL
 2. **水平移动**: 在当前层向右移动，直到下一个节点 > 目标值
 3. **向下移动**: 移动到下一层继续查找
 4. **重复过程**: 直到找到目标或到达Level 0
+
+**查找12的路径演示**:
+- Level 3: 1 → 17 (17>12，下降)
+- Level 2: 1 → 9 → 17 (17>12，下降) 
+- Level 1: 1 → 4 → 9 → 17 (17>12，下降)
+- Level 0: 1 → 4 → 9 → 12 ✓ (找到目标)
 
 ```java
 // 跳表查找伪代码
@@ -249,418 +303,6 @@ public class ConcurrentSkipListMap<K,V> {
 
 **代码解释**: ConcurrentSkipListMap的高并发性能来源于其巧妙的无锁设计。它大量使用CAS操作来实现原子更新，避免了传统锁机制的开销。这使得读操作完全无锁，写操作在大多数情况下也能避免阻塞。
 
-### 并发性能测试
-
-```java
-public class MemTableConcurrencyTest {
-    
-    public void testConcurrentWrites() throws InterruptedException {
-        MemTable memTable = new MemTable(100000);    // 创建大容量MemTable
-        int threadCount = 8;                          // 设置并发线程数
-        int operationsPerThread = 10000;              // 每线程操作数
-        
-        CountDownLatch latch = new CountDownLatch(threadCount);  // 同步工具
-        long startTime = System.nanoTime();                     // 记录开始时间
-        
-        // 启动多个写线程
-        for (int i = 0; i < threadCount; i++) {
-            final int threadId = i;  // 为每个线程分配ID
-            new Thread(() -> {
-                try {
-                    // 每个线程执行指定数量的写操作
-                    for (int j = 0; j < operationsPerThread; j++) {
-                        String key = "key_" + threadId + "_" + j;          // 生成唯一键
-                        String value = "value_" + System.currentTimeMillis();  // 生成值
-                        memTable.put(key, value);                         // 执行写入
-                    }
-                } finally {
-                    latch.countDown();  // 完成时通知主线程
-                }
-            }).start();
-        }
-        
-        latch.await();  // 等待所有线程完成
-        long duration = System.nanoTime() - startTime;  // 计算总耗时
-        
-        int totalOps = threadCount * operationsPerThread;           // 总操作数
-        double throughput = totalOps / (duration / 1_000_000_000.0);  // 计算吞吐量
-        
-        System.out.printf("并发写入测试: %d线程, %d操作, 吞吐量: %.0f ops/sec%n", 
-                         threadCount, totalOps, throughput);
-    }
-}
-```
-
-**代码解释**: 这个并发测试验证了MemTable在高并发写入场景下的性能表现。通过多个线程同时写入不同的键，我们可以测量系统的吞吐量和并发能力。使用CountDownLatch确保所有线程同时开始和结束，获得准确的性能数据。
-
-## 内存管理
-
-### 1. 内存占用估算
-
-```java
-public class MemTableMemoryAnalysis {
-    
-    // 估算MemTable的总内存使用量
-    public static long estimateMemoryUsage(MemTable memTable) {
-        // ConcurrentSkipListMap 的结构开销
-        long mapOverhead = estimateSkipListOverhead(memTable.size());
-        
-        // KeyValue 对象本身的开销
-        long keyValueOverhead = memTable.size() * estimateKeyValueSize();
-        
-        // 字符串数据的实际存储开销
-        long stringDataOverhead = estimateStringDataSize(memTable);
-        
-        return mapOverhead + keyValueOverhead + stringDataOverhead;  // 返回总内存占用
-    }
-    
-    // 估算跳表结构的内存开销
-    private static long estimateSkipListOverhead(int size) {
-        // 每个节点的平均层数约为 log2(size)
-        double avgLevels = Math.log(size) / Math.log(2);
-        
-        // 每个节点的开销：对象头 + forward数组 + key/value引用
-        long nodeOverhead = 12 +                        // 对象头
-                           (long)(avgLevels * 8) +      // forward指针数组
-                           16;                          // key和value引用
-        
-        return size * nodeOverhead;  // 总的节点开销
-    }
-    
-    // 估算KeyValue对象的平均大小
-    private static long estimateKeyValueSize() {
-        return 12 +    // 对象头
-               16 +    // 4个字段引用
-               8 +     // timestamp字段
-               4;      // deleted字段（对齐后）
-    }
-    
-    // 估算字符串数据的存储开销
-    private static long estimateStringDataSize(MemTable memTable) {
-        // 这里简化处理，实际实现需要遍历所有KeyValue对象
-        return memTable.size() * 50;  // 假设平均每个键值对50字节
-    }
-}
-```
-
-**代码解释**: 内存估算对于系统调优至关重要。这个分析包括三个部分：跳表结构开销、KeyValue对象开销和字符串数据开销。通过准确估算内存使用，我们可以合理设置maxSize参数，避免内存溢出。
-
-### 2. 内存优化策略
-
-```java
-public class OptimizedMemTable {
-    
-    // 字符串池化减少重复键的内存占用
-    private static final Map<String, String> keyPool = new ConcurrentHashMap<>();
-    
-    public void put(String key, String value) {
-        // 对键进行池化处理，减少重复字符串的内存占用
-        String internedKey = keyPool.computeIfAbsent(key, k -> k);
-        
-        KeyValue kv = new KeyValue(internedKey, value);  // 使用池化的键
-        data.put(internedKey, kv);                       // 插入数据
-    }
-    
-    // 定期清理无用的池化键
-    public void cleanKeyPool() {
-        Set<String> activeKeys = data.keySet();      // 获取当前活跃的键
-        keyPool.keySet().retainAll(activeKeys);      // 只保留活跃的键
-    }
-}
-```
-
-**代码解释**: 字符串池化是一种重要的内存优化技术。当系统中存在大量相似的键（如"user:1", "user:2"等）时，池化可以显著减少内存占用。`computeIfAbsent`方法确保线程安全，`cleanKeyPool`方法定期清理不再使用的键。
-
-## 性能优化
-
-### 1. 批量操作
-
-```java
-public void putBatch(Map<String, String> entries) {
-    // 批量写入减少单个操作的开销
-    for (Map.Entry<String, String> entry : entries.entrySet()) {
-        String key = entry.getKey();    // 获取键
-        String value = entry.getValue(); // 获取值
-        put(key, value);                // 执行单个写入操作
-    }
-    // 注意：这里可以进一步优化，比如批量检查刷盘条件
-}
-```
-
-**代码解释**: 批量操作通过减少方法调用开销来提高性能。虽然这个实现比较简单，但在实际应用中可以进一步优化，比如批量检查刷盘条件，或者使用更高效的批量插入算法。
-
-### 2. 预分配优化
-
-```java
-public MemTable(int maxSize) {
-    // 预估初始容量减少扩容开销
-    int initialCapacity = Math.min(maxSize / 4, 1000);  // 预估初始容量为最大值的1/4
-    this.data = new ConcurrentSkipListMap<>();          // 创建跳表（注：实际JDK实现不支持初始容量）
-    this.maxSize = maxSize;                             // 设置最大容量
-    this.currentSize = 0;                               // 初始化当前大小
-}
-```
-
-**代码解释**: 虽然ConcurrentSkipListMap不支持预分配，但这个概念很重要。在其他可以预分配的数据结构中，合理的初始容量可以减少扩容操作的开销，提高整体性能。
-
-### 3. 监控和调优
-
-```java
-public class MemTableMetrics {
-    private final AtomicLong putCount = new AtomicLong(0);   // 写入操作计数
-    private final AtomicLong getCount = new AtomicLong(0);   // 读取操作计数
-    private final AtomicLong hitCount = new AtomicLong(0);   // 命中次数计数
-    
-    // 记录写入操作
-    public void recordPut() {
-        putCount.incrementAndGet();  // 原子性地增加写入计数
-    }
-    
-    // 记录读取操作及其结果
-    public void recordGet(boolean hit) {
-        getCount.incrementAndGet();  // 原子性地增加读取计数
-        if (hit) {
-            hitCount.incrementAndGet();  // 如果命中，增加命中计数
-        }
-    }
-    
-    // 计算命中率
-    public double getHitRate() {
-        long gets = getCount.get();  // 获取总读取次数
-        return gets > 0 ? (double) hitCount.get() / gets : 0.0;  // 计算命中率
-    }
-    
-    // 获取所有性能指标
-    public String getMetrics() {
-        return String.format("PUT: %d, GET: %d, HIT_RATE: %.2f%%", 
-                           putCount.get(), getCount.get(), getHitRate() * 100);
-    }
-}
-```
-
-**代码解释**: 性能监控是系统调优的基础。这个指标类使用原子类来确保在高并发环境下计数的准确性。通过跟踪写入次数、读取次数和命中率，我们可以了解MemTable的使用模式和性能表现。
-
-## 实际应用示例
-
-### 1. 高并发写入场景
-
-```java
-public class HighThroughputExample {
-    
-    public static void main(String[] args) {
-        MemTable memTable = new MemTable(50000);  // 创建较大容量的MemTable
-        
-        // 模拟高并发写入场景的参数设置
-        int writerThreads = 4;        // 写入线程数
-        int writesPerThread = 10000;  // 每个线程的写入次数
-        
-        ExecutorService executor = Executors.newFixedThreadPool(writerThreads);  // 创建线程池
-        CountDownLatch latch = new CountDownLatch(writerThreads);                // 同步计数器
-        
-        long startTime = System.currentTimeMillis();  // 记录开始时间
-        
-        // 启动多个写入线程
-        for (int i = 0; i < writerThreads; i++) {
-            final int threadId = i;  // 为每个线程分配唯一ID
-            executor.submit(() -> {
-                try {
-                    // 每个线程执行大量写入操作
-                    for (int j = 0; j < writesPerThread; j++) {
-                        String key = "thread_" + threadId + "_key_" + j;           // 生成唯一键
-                        String value = "value_" + System.currentTimeMillis();      // 生成时间戳值
-                        memTable.put(key, value);                                  // 执行写入
-                    }
-                } finally {
-                    latch.countDown();  // 线程完成时递减计数器
-                }
-            });
-        }
-        
-        try {
-            latch.await();  // 等待所有线程完成
-            long duration = System.currentTimeMillis() - startTime;  // 计算总耗时
-            int totalWrites = writerThreads * writesPerThread;        // 计算总写入次数
-            
-            // 输出性能统计信息
-            System.out.printf("写入完成: %d条记录, 耗时: %dms, 吞吐量: %.0f ops/sec%n",
-                             totalWrites, duration, totalWrites * 1000.0 / duration);
-            
-            // 输出MemTable状态信息
-            System.out.printf("MemTable状态: 大小=%d, 是否需要刷盘=%b%n",
-                             memTable.size(), memTable.shouldFlush());
-                             
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();  // 恢复中断状态
-        } finally {
-            executor.shutdown();  // 关闭线程池
-        }
-    }
-}
-```
-
-**代码解释**: 这个高吞吐量示例模拟了实际生产环境中的高并发写入场景。通过多个线程并发写入数据，我们可以测试MemTable的并发性能和稳定性。使用线程池管理线程，CountDownLatch确保准确计时。
-
-### 2. 混合读写场景
-
-```java
-public class MixedWorkloadExample {
-    
-    public static void main(String[] args) {
-        MemTable memTable = new MemTable(20000);  // 创建MemTable
-        
-        // 先写入一些基础数据作为读取测试的基础
-        for (int i = 0; i < 10000; i++) {
-            memTable.put("base_key_" + i, "base_value_" + i);
-        }
-        
-        // 用于统计操作结果的原子计数器
-        AtomicInteger reads = new AtomicInteger(0);   // 读取次数
-        AtomicInteger writes = new AtomicInteger(0);  // 写入次数
-        AtomicInteger hits = new AtomicInteger(0);    // 读取命中次数
-        
-        // 定义混合读写负载的任务
-        Runnable mixedWorkload = () -> {
-            Random random = new Random();  // 随机数生成器
-            
-            // 执行5000次混合操作
-            for (int i = 0; i < 5000; i++) {
-                if (random.nextDouble() < 0.7) {
-                    // 70% 概率执行读操作
-                    String key = "base_key_" + random.nextInt(10000);  // 随机选择一个键
-                    String value = memTable.get(key);                  // 执行读取
-                    reads.incrementAndGet();                           // 增加读取计数
-                    if (value != null) {
-                        hits.incrementAndGet();  // 如果命中，增加命中计数
-                    }
-                } else {
-                    // 30% 概率执行写操作
-                    String key = "new_key_" + random.nextInt(5000);                  // 生成新键
-                    String value = "new_value_" + System.currentTimeMillis();        // 生成新值
-                    memTable.put(key, value);                                        // 执行写入
-                    writes.incrementAndGet();                                        // 增加写入计数
-                }
-            }
-        };
-        
-        // 启动多个线程执行混合负载
-        long startTime = System.currentTimeMillis();  // 记录开始时间
-        Thread[] threads = new Thread[4];             // 创建4个线程
-        for (int i = 0; i < threads.length; i++) {
-            threads[i] = new Thread(mixedWorkload);    // 创建执行混合负载的线程
-            threads[i].start();                        // 启动线程
-        }
-        
-        // 等待所有线程完成
-        for (Thread thread : threads) {
-            try {
-                thread.join();  // 等待线程结束
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();  // 恢复中断状态
-            }
-        }
-        
-        // 计算并输出统计结果
-        long duration = System.currentTimeMillis() - startTime;  // 计算总耗时
-        int totalOps = reads.get() + writes.get();               // 计算总操作数
-        double hitRate = (double) hits.get() / reads.get();      // 计算命中率
-        
-        System.out.printf("混合负载测试结果:%n");
-        System.out.printf("总操作: %d, 读: %d, 写: %d%n", totalOps, reads.get(), writes.get());
-        System.out.printf("耗时: %dms, 吞吐量: %.0f ops/sec%n", duration, totalOps * 1000.0 / duration);
-        System.out.printf("命中率: %.2f%% (%d/%d)%n", hitRate * 100, hits.get(), reads.get());
-    }
-}
-```
-
-**代码解释**: 这个混合负载示例更贴近实际应用场景，其中读操作占主导地位（70%）。通过预先写入基础数据，我们确保读操作有数据可读。使用原子计数器统计各种操作的次数，最后计算整体性能指标。
-
-## 常见问题和优化
-
-### 1. 内存溢出问题
-
-**问题**: MemTable无限增长导致OOM
-
-**解决方案**:
-```java
-public class MemTableWithBackpressure {
-    private volatile boolean flushInProgress = false;  // 刷盘进行中标志
-    
-    public void put(String key, String value) {
-        // 检查是否需要等待刷盘完成
-        while (shouldFlush() && flushInProgress) {
-            try {
-                Thread.sleep(1);  // 短暂等待，避免CPU空转
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();  // 恢复中断状态
-                return;                              // 中断时退出
-            }
-        }
-        
-        KeyValue kv = new KeyValue(key, value);  // 创建KeyValue对象
-        data.put(key, kv);                       // 插入数据
-        currentSize++;                           // 增加大小计数
-    }
-    
-    // 设置刷盘状态的方法
-    public void setFlushInProgress(boolean inProgress) {
-        this.flushInProgress = inProgress;  // 更新刷盘状态
-    }
-}
-```
-
-**代码解释**: 背压控制机制防止MemTable无限增长。当MemTable需要刷盘且正在进行刷盘操作时，新的写入会暂时等待。这种简单的流控机制可以防止内存溢出，但需要注意不要造成长时间的阻塞。
-
-### 2. 热点键问题
-
-**问题**: 某些键被频繁访问导致竞争
-
-**优化**: 
-```java
-// 使用分段策略减少热点竞争
-public class ShardedMemTable {
-    private final MemTable[] shards;        // MemTable分片数组
-    private final int shardMask;            // 分片掩码，用于快速计算分片索引
-    
-    public ShardedMemTable(int shardCount, int maxSizePerShard) {
-        this.shards = new MemTable[shardCount];           // 创建分片数组
-        this.shardMask = shardCount - 1;                  // 计算掩码（假设shardCount是2的幂）
-        
-        // 初始化每个分片
-        for (int i = 0; i < shardCount; i++) {
-            shards[i] = new MemTable(maxSizePerShard);    // 创建分片MemTable
-        }
-    }
-    
-    // 根据键的哈希值选择对应的分片
-    private MemTable getShard(String key) {
-        int hash = key.hashCode();           // 计算键的哈希值
-        int shardIndex = hash & shardMask;   // 使用位运算快速计算分片索引
-        return shards[shardIndex];           // 返回对应的分片
-    }
-    
-    // 分片写入操作
-    public void put(String key, String value) {
-        getShard(key).put(key, value);       // 将操作路由到对应分片
-    }
-    
-    // 分片读取操作
-    public String get(String key) {
-        return getShard(key).get(key);       // 从对应分片读取数据
-    }
-    
-    // 检查是否有分片需要刷盘
-    public boolean shouldFlush() {
-        for (MemTable shard : shards) {
-            if (shard.shouldFlush()) {
-                return true;                 // 任何分片需要刷盘都返回true
-            }
-        }
-        return false;
-    }
-}
-```
-
-**代码解释**: 分片策略通过将数据分散到多个MemTable中来减少热点竞争。每个键根据其哈希值被路由到特定的分片，这样不同的键可以并行访问不同的分片。使用位运算（&操作）来快速计算分片索引，提高路由效率。
 
 ## 小结
 
@@ -671,12 +313,6 @@ MemTable是LSM Tree的核心组件，它通过以下特性实现了高性能：
 3. **内存效率**: 紧凑的数据结构减少内存开销
 4. **有序性**: 支持高效的有序遍历和范围查询
 
-## 下一步学习
-
-现在你已经理解了MemTable的实现，接下来我们将学习数据如何从内存持久化到磁盘：
-
-继续阅读：[第4章：SSTable 磁盘存储](04-sstable-disk-storage.md)
-
 ---
 
 ## 思考题
@@ -684,6 +320,3 @@ MemTable是LSM Tree的核心组件，它通过以下特性实现了高性能：
 1. 为什么ConcurrentSkipListMap比ConcurrentHashMap更适合MemTable？
 2. 如何处理MemTable刷盘过程中的新写入？
 3. 跳表的随机层数如何影响性能？
-
-**下一章预告**: 我们将深入学习SSTable的文件格式、索引结构和查询优化。 
-**下一章预告**: 我们将深入学习SSTable的文件格式、索引结构和查询优化。 

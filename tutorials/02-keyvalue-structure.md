@@ -1,3 +1,19 @@
+🔥 推荐一个高质量的Java LSM Tree开源项目！
+[https://github.com/brianxiadong/java-lsm-tree](https://github.com/brianxiadong/java-lsm-tree)
+**java-lsm-tree** 是一个从零实现的Log-Structured Merge Tree，专为高并发写入场景设计。
+核心亮点：
+⚡ 极致性能：写入速度超过40万ops/秒，完爆传统B+树
+🏗️ 完整架构：MemTable跳表 + SSTable + WAL + 布隆过滤器 + 多级压缩
+📚 深度教程：12章详细教程，从基础概念到生产优化，每行代码都有注释
+🔒 并发安全：读写锁机制，支持高并发场景
+💾 数据可靠：WAL写前日志确保崩溃恢复，零数据丢失
+适合谁？
+- 想深入理解LSM Tree原理的开发者
+- 需要高写入性能存储引擎的项目
+- 准备数据库/存储系统面试的同学
+- 对分布式存储感兴趣的工程师
+⭐ 给个Star支持开源！
+
 # 第2章：KeyValue 数据结构
 
 ## 为什么需要KeyValue结构？
@@ -8,6 +24,7 @@
 - **数据完整性**: 确保数据的一致性
 
 因此，我们设计了`KeyValue`类作为LSM Tree的基础数据单元。
+> 本质原因是我们尽量要使用顺序写，这样才能保证较高的写入速度。但是顺序写的同时，如果有老的相同Key的数据，不可能再回过头去删除它，这样也会影响效率，所以才产生了上述的三个问题。
 
 ## KeyValue 类设计
 
@@ -16,7 +33,11 @@
 ```java
 package com.brianxiadong.lsmtree;
 
-public class KeyValue {
+/**
+ * LSM Tree中的键值对数据结构
+ * 包含键、值和时间戳信息
+ */
+public class KeyValue implements Comparable<KeyValue> {
     // 键字段：存储数据的唯一标识符，不可变
     private final String key;        
     // 值字段：存储实际数据内容，删除时为null
@@ -28,21 +49,20 @@ public class KeyValue {
 
     // 构造函数：创建正常的键值对
     public KeyValue(String key, String value) {
-        this.key = key;                                // 设置键
-        this.value = value;                            // 设置值
-        this.timestamp = System.currentTimeMillis();  // 使用当前时间作为时间戳
-        this.deleted = false;                          // 标记为非删除状态
+        this(key, value, System.currentTimeMillis(), false);  // 调用完整构造函数
     }
     
-    // 私有构造函数：用于内部创建特定状态的KeyValue对象
-    private KeyValue(String key, String value, long timestamp, boolean deleted) {
+    // 完整构造函数：用于创建特定状态的KeyValue对象
+    public KeyValue(String key, String value, long timestamp, boolean deleted) {
         this.key = key;              // 设置键
         this.value = value;          // 设置值（可能为null）
         this.timestamp = timestamp;  // 设置指定的时间戳
         this.deleted = deleted;      // 设置删除标记
     }
     
-    // 静态工厂方法：创建删除标记（墓碑）
+    /**
+     * 创建删除标记的键值对
+     */
     public static KeyValue createTombstone(String key) {
         // 创建一个删除标记，值为null，标记为已删除
         return new KeyValue(key, null, System.currentTimeMillis(), true);
@@ -66,6 +86,24 @@ public class KeyValue {
     // 检查是否为删除标记的方法
     public boolean isDeleted() {
         return deleted;
+    }
+    
+    // 实现Comparable接口，用于排序
+    @Override
+    public int compareTo(KeyValue other) {
+        int keyCompare = this.key.compareTo(other.key);    // 首先按键排序
+        if (keyCompare != 0) {
+            return keyCompare;                             // 键不同，返回键的比较结果
+        }
+        // 如果键相同，按时间戳降序排列（新的在前）
+        return Long.compare(other.timestamp, this.timestamp);
+    }
+    
+    // 重写toString方法，便于调试
+    @Override
+    public String toString() {
+        return String.format("KeyValue{key='%s', value='%s', timestamp=%d, deleted=%s}",
+                key, value, timestamp, deleted);
     }
 }
 ```
@@ -97,7 +135,7 @@ assert kv2.getTimestamp() > kv1.getTimestamp();   // 验证时间戳顺序
 
 ### 2. 删除标记 (Tombstone)
 
-在LSM Tree中，删除操作不是立即物理删除，而是插入一个"墓碑"标记。
+在LSM Tree中，删除操作不是立即物理删除，而是插入一个"墓碑"标记。在查询时，查询到时间戳最大的数据，发现是一个墓碑数据，那么代表这个数据被删除了。
 
 ```java
 // 正常的键值对
@@ -458,11 +496,6 @@ KeyValue是LSM Tree的基础数据结构，它通过以下设计满足了LSM Tre
 3. **不可变性**: 确保线程安全和数据一致性
 4. **轻量级**: 最小化内存和CPU开销
 
-## 下一步学习
-
-理解了KeyValue的设计后，我们将学习它如何在MemTable中使用：
-
-继续阅读：[第3章：MemTable 内存表](03-memtable-skiplist.md)
 
 ---
 
@@ -472,4 +505,3 @@ KeyValue是LSM Tree的基础数据结构，它通过以下设计满足了LSM Tre
 2. 墓碑标记会一直存在吗？什么情况下可以安全清理？
 3. 如何优化KeyValue的内存使用？
 
-**下一章预告**: 我们将深入学习MemTable的实现，理解跳表的工作原理和并发控制机制。 
