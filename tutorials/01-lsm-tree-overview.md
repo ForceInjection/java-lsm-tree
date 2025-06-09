@@ -1,9 +1,25 @@
+🔥 推荐一个高质量的Java LSM Tree开源项目！
+[https://github.com/brianxiadong/java-lsm-tree](https://github.com/brianxiadong/java-lsm-tree)
+**java-lsm-tree** 是一个从零实现的Log-Structured Merge Tree，专为高并发写入场景设计。
+核心亮点：
+⚡ 极致性能：写入速度超过40万ops/秒，完爆传统B+树
+🏗️ 完整架构：MemTable跳表 + SSTable + WAL + 布隆过滤器 + 多级压缩
+📚 深度教程：12章详细教程，从基础概念到生产优化，每行代码都有注释
+🔒 并发安全：读写锁机制，支持高并发场景
+💾 数据可靠：WAL写前日志确保崩溃恢复，零数据丢失
+适合谁？
+- 想深入理解LSM Tree原理的开发者
+- 需要高写入性能存储引擎的项目
+- 准备数据库/存储系统面试的同学
+- 对分布式存储感兴趣的工程师
+⭐ 给个Star支持开源！
 # 第1章：LSM Tree 概述
 
 ## 什么是LSM Tree？
 
 **Log-Structured Merge Tree (LSM Tree)** 是一种专为写密集型工作负载优化的数据结构。它被广泛应用于现代数据库系统中，如LevelDB、RocksDB、Cassandra、HBase等。
 
+>简单来说，就是特别适用于写多读少的场景，比如日志、调用链记录等。
 ### 核心设计思想
 
 LSM Tree的核心思想是：
@@ -12,7 +28,7 @@ LSM Tree的核心思想是：
 - **通过多层存储结构平衡内存和磁盘的使用**
 
 ## LSM Tree vs 传统B+树
-
+我们来对比一下LSM Tree和Mysql使用的传统B+树：
 | 特征 | B+树 | LSM Tree |
 |------|------|----------|
 | 写入性能 | O(log N) 随机写 | O(log M) 顺序写 (M << N) |
@@ -23,34 +39,57 @@ LSM Tree的核心思想是：
 
 ## LSM Tree 架构概览
 
+### 系统架构图
+
+```mermaid
+graph TD
+    A[Client 写入请求] --> B[WAL 写前日志]
+    B --> C[Active MemTable]
+    C -->|容量满| D[Immutable MemTable]
+    D --> E[刷盘到 SSTable]
+    E --> F[Level 0 SSTable文件]
+    
+    G[Client 读取请求] --> C
+    G --> D
+    G --> H[Level 0 SSTables]
+    G --> I[Level 1 SSTables]
+    G --> J[Level N SSTables]
+    
+    F -->|压缩| H
+    H -->|压缩| I
+    I -->|压缩| J
+    
+    K[Bloom Filter] --> H
+    K --> I
+    K --> J
+    
+    L[Compaction Strategy] --> F
+    L --> H
+    L --> I
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        LSM Tree 架构                         │
-├─────────────────────────────────────────────────────────────┤
-│  写入路径: Client → WAL → MemTable → (满) → SSTable         │
-│  读取路径: Client → MemTable → Immutable → SSTables        │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  ┌──────────────┐    ┌─────────────────────────────────────┐│
-│  │  Write-Ahead │    │           内存层                    ││
-│  │     Log      │    │  ┌─────────────┐ ┌─────────────────┐││
-│  │   (WAL)      │───▶│  │Active       │ │Immutable        │││
-│  │              │    │  │MemTable     │ │MemTables        │││
-│  └──────────────┘    │  └─────────────┘ └─────────────────┘││
-│                      └─────────────────────────────────────┘│
-│                                    │                        │
-│                                    ▼                        │
-│  ┌─────────────────────────────────────────────────────────┐│
-│  │                      磁盘层                              ││
-│  │  Level 0: [SST] [SST] [SST] [SST]                      ││
-│  │  Level 1: [SST] [SST] [SST] [SST] [SST] [SST]          ││
-│  │  Level 2: [SST] [SST] [SST] ... (更多文件)             ││
-│  │  Level N: [SST] [SST] [SST] ... (最大层)               ││
-│  └─────────────────────────────────────────────────────────┘│
-├─────────────────────────────────────────────────────────────┤
-│  后台压缩: 定期合并SSTable文件，清理重复/删除的数据          │
-└─────────────────────────────────────────────────────────────┘
-```
+**图表说明**: 这个架构图展示了LSM Tree的完整数据流向和组件关系。左侧显示写入路径：客户端写入请求首先写入WAL日志确保持久性，然后存入Active MemTable，当MemTable容量满时转为Immutable状态并刷盘生成SSTable文件。右侧显示读取路径：客户端读取请求会依次查询MemTable和各级SSTable文件。布隆过滤器附加在每个SSTable上用于快速过滤，压缩策略在后台持续优化存储结构。这种设计实现了写入的高性能（顺序写）和读取的合理性能（分层查找）。
+
+>很复杂吗？但是当我们一行代码一行代码实现了这个LSM Tree之后，你会发现其实也并不难。
+### 架构层次说明
+
+**内存层 (Memory Layer)**
+- `WAL (Write-Ahead Log)`: 写前日志，确保数据持久性
+- `Active MemTable`: 接收新写入的内存表
+- `Immutable MemTable`: 正在刷盘的只读内存表
+
+**磁盘层 (Disk Layer)**
+- `Level 0`: 直接从MemTable刷盘的SSTable文件
+- `Level 1-N`: 通过压缩生成的分层SSTable文件
+- `Bloom Filter`: 每个SSTable的布隆过滤器
+
+**后台进程 (Background Process)**
+- `Compaction Strategy`: 压缩策略，负责合并和清理SSTable
+
+### 数据流向
+
+**写入路径**: `Client → WAL → MemTable → SSTable → Compaction`
+
+**读取路径**: `Client → MemTable → Immutable → Level 0 → Level 1 → ... → Level N`
 
 ## 核心组件详解
 
@@ -91,40 +130,44 @@ LSM Tree的核心思想是：
 ## 数据流详解
 
 ### 写入流程
-```
-1. 写入WAL日志 (持久化保证)
-     ↓
-2. 写入Active MemTable
-     ↓
-3. MemTable满了？
-     ├─ 否 → 继续接收写入
-     └─ 是 → 转为Immutable MemTable
-             ↓
-           刷盘到SSTable
-             ↓
-           删除Immutable MemTable
-             ↓
-           触发压缩 (如果需要)
-```
 
+```mermaid
+graph TD
+    A[写入WAL日志] --> B[写入Active MemTable]
+    B --> C{MemTable满了?}
+    C -->|否| D[继续接收写入]
+    C -->|是| E[转为Immutable MemTable]
+    E --> F[刷盘到SSTable]
+    F --> G[删除Immutable MemTable]
+    G --> H{需要压缩?}
+    H -->|是| I[触发压缩]
+    H -->|否| J[完成]
+    I --> J
+    D --> B
+```
+**写入流程说明**: 这个流程图详细展示了LSM Tree的写入过程。每个写入操作首先记录到WAL日志中，这是持久性的第一道保障。然后数据写入Active MemTable，这是一个内存中的有序结构，提供快速的写入性能。当MemTable达到容量阈值时，系统会将其标记为Immutable（不可变），同时创建新的Active MemTable继续接收写入，这样保证了写入操作的连续性。Immutable MemTable随后被刷盘到磁盘上的SSTable文件，完成持久化。最后系统检查是否需要触发压缩操作来优化存储结构。这个流程确保了高写入性能和数据的可靠性。
 ### 读取流程
+
+```mermaid
+graph TD
+    A[查询Active MemTable] --> B{找到?}
+    B -->|是| C[返回结果]
+    B -->|否| D[查询Immutable MemTables]
+    D --> E{找到?}
+    E -->|是| C
+    E -->|否| F[按时间倒序查询SSTables]
+    F --> G[布隆过滤器判断]
+    G --> H{可能存在?}
+    H -->|否| I[跳过文件]
+    H -->|是| J[查询文件]
+    J --> K{找到?}
+    K -->|是| C
+    K -->|否| L{还有文件?}
+    L -->|是| F
+    L -->|否| M[返回null]
+    I --> L
 ```
-1. 查询Active MemTable
-     ├─ 找到 → 返回结果
-     └─ 未找到 ↓
-
-2. 查询Immutable MemTables
-     ├─ 找到 → 返回结果  
-     └─ 未找到 ↓
-
-3. 按时间倒序查询SSTables
-     ├─ 布隆过滤器判断
-     │   ├─ 肯定不存在 → 跳过
-     │   └─ 可能存在 → 查询文件
-     ├─ 找到 → 返回结果
-     └─ 所有文件都未找到 → 返回null
-```
-
+**读取流程说明**: 这个流程图展示了LSM Tree的分层查找策略。读取操作遵循"新数据优先"的原则，首先查询Active MemTable，因为它包含最新的数据。如果没找到，继续查询Immutable MemTable，这些是正在刷盘但尚未完成的数据。接下来按时间倒序查询SSTable文件，新文件优先查询，因为它们包含更新的数据版本。在查询每个SSTable之前，系统会先使用布隆过滤器快速判断键是否可能存在，这能有效减少无效的磁盘I/O操作。如果布隆过滤器表明键可能存在，才会实际读取文件进行查找。这种分层查找机制平衡了读取性能和存储效率。
 ## 性能特征
 
 ### 写入性能优势
@@ -177,8 +220,6 @@ LSM Tree的核心思想是：
 1. **KeyValue数据结构** - 理解基础数据格式
 2. **MemTable实现** - 深入跳表和并发控制
 3. **SSTable格式** - 磁盘存储的设计细节
-
-继续阅读：[第2章：KeyValue 数据结构](02-keyvalue-structure.md)
 
 ---
 
