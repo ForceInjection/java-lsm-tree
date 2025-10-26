@@ -21,7 +21,9 @@ public class LSMTreeBenchmark {
 
     @Before
     public void setUp() throws IOException {
-        testDir = "benchmark_" + System.currentTimeMillis();
+        // 使用系统临时目录避免在项目根目录创建测试文件
+        String tempDir = System.getProperty("java.io.tmpdir");
+        testDir = tempDir + File.separator + "benchmark_" + System.currentTimeMillis();
         lsmTree = new LSMTree(testDir, 10000); // 较大的MemTable以减少刷盘频率
         random = new Random(42); // 固定种子确保结果可重现
     }
