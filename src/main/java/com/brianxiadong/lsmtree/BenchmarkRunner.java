@@ -13,12 +13,20 @@ import java.util.Random;
  */
 public class BenchmarkRunner {
 
+    private String baseDataDir;
+
+    public BenchmarkRunner(String baseDataDir) {
+        this.baseDataDir = baseDataDir != null ? baseDataDir : "benchmark_data";
+    }
+
     public static void main(String[] args) {
         System.out.println("====================================");
         System.out.println("     LSM Tree 性能基准测试");
         System.out.println("====================================");
 
-        BenchmarkRunner runner = new BenchmarkRunner();
+        // 支持通过命令行参数指定基础数据目录
+        String baseDataDir = args.length > 0 ? args[0] : "benchmark_data";
+        BenchmarkRunner runner = new BenchmarkRunner(baseDataDir);
 
         try {
             runner.runAllBenchmarks();
@@ -55,7 +63,7 @@ public class BenchmarkRunner {
     private void benchmarkSequentialWrites() throws IOException {
         System.out.println("=== 顺序写入性能测试 ===");
 
-        String testDir = "benchmark_seq_" + System.currentTimeMillis();
+        String testDir = baseDataDir + "/benchmark_seq_" + System.currentTimeMillis();
         LSMTree lsmTree = new LSMTree(testDir, 10000);
 
         try {
@@ -77,14 +85,14 @@ public class BenchmarkRunner {
             }
         } finally {
             lsmTree.close();
-            deleteDirectory(new File(testDir));
+            // deleteDirectory(new File(testDir)); // 保留测试数据以便排查问题
         }
     }
 
     private void benchmarkRandomWrites() throws IOException {
         System.out.println("=== 随机写入性能测试 ===");
 
-        String testDir = "benchmark_rand_" + System.currentTimeMillis();
+        String testDir = baseDataDir + "/benchmark_rand_" + System.currentTimeMillis();
         LSMTree lsmTree = new LSMTree(testDir, 10000);
         Random random = new Random(42);
 
@@ -113,14 +121,14 @@ public class BenchmarkRunner {
             }
         } finally {
             lsmTree.close();
-            deleteDirectory(new File(testDir));
+            // deleteDirectory(new File(testDir)); // 保留测试数据以便排查问题
         }
     }
 
     private void benchmarkReads() throws IOException {
         System.out.println("=== 读取性能测试 ===");
 
-        String testDir = "benchmark_read_" + System.currentTimeMillis();
+        String testDir = baseDataDir + "/benchmark_read_" + System.currentTimeMillis();
         LSMTree lsmTree = new LSMTree(testDir, 10000);
         Random random = new Random(42);
 
@@ -166,14 +174,14 @@ public class BenchmarkRunner {
             }
         } finally {
             lsmTree.close();
-            deleteDirectory(new File(testDir));
+            // deleteDirectory(new File(testDir)); // 保留测试数据以便排查问题
         }
     }
 
     private void benchmarkMixedWorkload() throws IOException {
         System.out.println("=== 混合工作负载测试 (70%读 + 30%写) ===");
 
-        String testDir = "benchmark_mixed_" + System.currentTimeMillis();
+        String testDir = baseDataDir + "/benchmark_mixed_" + System.currentTimeMillis();
         LSMTree lsmTree = new LSMTree(testDir, 10000);
         Random random = new Random(42);
 
@@ -216,14 +224,14 @@ public class BenchmarkRunner {
             System.out.printf("读命中率: %.1f%% | 统计信息: %s%n", hitRate, lsmTree.getStats());
         } finally {
             lsmTree.close();
-            deleteDirectory(new File(testDir));
+            // deleteDirectory(new File(testDir)); // 保留测试数据以便排查问题
         }
     }
 
     private void benchmarkWriteLatency() throws IOException {
         System.out.println("=== 写入延迟分布测试 ===");
 
-        String testDir = "benchmark_latency_" + System.currentTimeMillis();
+        String testDir = baseDataDir + "/benchmark_latency_" + System.currentTimeMillis();
         LSMTree lsmTree = new LSMTree(testDir, 10000);
 
         try {
@@ -256,14 +264,14 @@ public class BenchmarkRunner {
                     median / 1000.0, p95 / 1000.0, p99 / 1000.0);
         } finally {
             lsmTree.close();
-            deleteDirectory(new File(testDir));
+            // deleteDirectory(new File(testDir)); // 保留测试数据以便排查问题
         }
     }
 
     private void benchmarkMemTableFlushImpact() throws IOException {
         System.out.println("=== MemTable刷盘对性能的影响 ===");
 
-        String testDir = "benchmark_flush_" + System.currentTimeMillis();
+        String testDir = baseDataDir + "/benchmark_flush_" + System.currentTimeMillis();
 
         // 使用小的MemTable来频繁触发刷盘
         LSMTree smallMemTableLSM = new LSMTree(testDir, 100);
@@ -286,10 +294,15 @@ public class BenchmarkRunner {
             System.out.println("统计信息: " + smallMemTableLSM.getStats());
         } finally {
             smallMemTableLSM.close();
-            deleteDirectory(new File(testDir));
+            // deleteDirectory(new File(testDir)); // 保留测试数据以便排查问题
         }
     }
 
+    /**
+     * 删除目录及其所有子目录和文件
+     * 
+     * @param directory 要删除的目录
+     */
     private void deleteDirectory(File directory) {
         if (directory.exists()) {
             File[] files = directory.listFiles();
