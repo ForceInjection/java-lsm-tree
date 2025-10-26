@@ -17,14 +17,14 @@
 
 #### 3.1.1 理论学习 (1-2 小时)
 
-- 阅读 `docs/lsm-tree-intro.md` 第 1-3 章
-- 阅读 `tutorials/01-lsm-tree-overview.md`
+- 阅读 [docs/lsm-tree-intro.md](../docs/lsm-tree-intro.md) 第 1-3 章
+- 阅读 [tutorials/01-lsm-tree-overview.md](../tutorials/01-lsm-tree-overview.md)
 - 理解 LSM Tree 的基本概念、设计动机和应用场景
 
 #### 3.1.2 代码阅读 (30 分钟)
 
 - 浏览项目整体结构
-- 查看 `README.md` 了解项目特性
+- 查看 [README.md](../README.md) 了解项目特性
 
 #### 3.1.3 动手实践 (1 小时)
 
@@ -63,13 +63,13 @@ mvn test
 
 #### 3.2.1 理论学习 (1 小时)
 
-- 阅读 `docs/soucrce-code-analysis.md` 第 3.1 节
-- 阅读 `tutorials/02-keyvalue-structure.md`
+- 阅读 [docs/soucrce-code-analysis.md](../docs/soucrce-code-analysis.md) 第 3.1 节
+- 阅读 [tutorials/02-keyvalue-structure.md](../tutorials/02-keyvalue-structure.md)
 - 理解时间戳版本控制和墓碑标记机制
 
 #### 3.2.2 代码阅读 (1 小时)
 
-- 深入阅读 `KeyValue.java` 源码
+- 深入阅读 [KeyValue.java](../src/main/java/com/brianxiadong/lsmtree/KeyValue.java) 源码
 - 理解 `Comparable` 接口的实现
 - 分析排序规则的设计
 
@@ -94,13 +94,13 @@ mvn test
 
 #### 3.3.1 理论学习 (1-2 小时)
 
-- 阅读 `docs/soucrce-code-analysis.md` 第 3.2 节
-- 阅读 `tutorials/03-memtable-skiplist.md`
+- 阅读 [docs/soucrce-code-analysis.md](../docs/soucrce-code-analysis.md) 第 3.2 节
+- 阅读 [tutorials/03-memtable-skiplist.md](../tutorials/03-memtable-skiplist.md)
 - 深入理解跳表数据结构的原理和优势
 
 #### 3.3.2 代码阅读 (1 小时)
 
-- 深入阅读 `MemTable.java` 源码
+- 深入阅读 [MemTable.java](../src/main/java/com/brianxiadong/lsmtree/MemTable.java) 源码
 - 理解 `ConcurrentSkipListMap` 的使用
 - 分析内存管理和刷盘触发机制
 
@@ -143,13 +143,13 @@ public class MemTablePerformanceAnalysis {
 
 #### 3.4.1 理论学习 (1-2 小时)
 
-- 阅读 `docs/soucrce-code-analysis.md` 第 3.3 节
-- 阅读 `tutorials/04-sstable-disk-storage.md`
+- 阅读 [docs/soucrce-code-analysis.md](../docs/soucrce-code-analysis.md) 第 3.3 节
+- 阅读 [tutorials/04-sstable-disk-storage.md](../tutorials/04-sstable-disk-storage.md)
 - 理解不可变文件的设计理念
 
 #### 3.4.2 代码阅读 (1 小时)
 
-- 深入阅读 `SSTable.java` 源码
+- 深入阅读 [SSTable.java](../src/main/java/com/brianxiadong/lsmtree/SSTable.java) 源码
 - 理解文件格式和序列化机制
 - 分析查询优化策略
 
@@ -179,13 +179,13 @@ public class SSTableAnalyzer {
 
 #### 3.5.1 理论学习 (1-2 小时)
 
-- 阅读 `docs/soucrce-code-analysis.md` 第 3.5 节
-- 阅读 `tutorials/05-bloom-filter.md`
+- 阅读 [docs/soucrce-code-analysis.md](../docs/soucrce-code-analysis.md) 第 3.5 节
+- 阅读 [tutorials/05-bloom-filter.md](../tutorials/05-bloom-filter.md)
 - 深入理解概率数据结构的原理
 
 #### 3.5.2 代码阅读 (1 小时)
 
-- 深入阅读 `BloomFilter.java` 源码
+- 深入阅读 [BloomFilter.java](../src/main/java/com/brianxiadong/lsmtree/BloomFilter.java) 源码
 - 理解哈希函数的实现
 - 分析参数计算公式
 
@@ -215,13 +215,13 @@ public class BloomFilterTuning {
 
 #### 3.6.1 理论学习 (1-2 小时)
 
-- 阅读 `docs/soucrce-code-analysis.md` 第 3.4 节
-- 阅读 `tutorials/06-wal-logging.md`
+- 阅读 [docs/soucrce-code-analysis.md](../docs/soucrce-code-analysis.md) 第 3.4 节
+- 阅读 [tutorials/06-wal-logging.md](../tutorials/06-wal-logging.md)
 - 理解数据持久性和崩溃恢复原理
 
 #### 3.6.2 代码阅读 (1 小时)
 
-- 深入阅读 `WriteAheadLog.java` 源码
+- 深入阅读 [WriteAheadLog.java](../src/main/java/com/brianxiadong/lsmtree/WriteAheadLog.java) 源码
 - 理解日志格式和恢复机制
 - 分析文件 I/O 优化策略
 
@@ -251,13 +251,13 @@ public class CrashRecoveryTest {
 
 #### 3.7.1 理论学习 (2 小时)
 
-- 阅读 `docs/soucrce-code-analysis.md` 第 3.6 节
-- 阅读 `tutorials/07-compaction-strategy.md`
+- 阅读 [docs/soucrce-code-analysis.md](../docs/soucrce-code-analysis.md) 第 3.6 节
+- 阅读 [tutorials/07-compaction-strategy.md](../tutorials/07-compaction-strategy.md)
 - 理解分层压缩的设计原理
 
 #### 3.7.2 代码阅读 (1 小时)
 
-- 深入阅读 `CompactionStrategy.java` 源码
+- 深入阅读 [CompactionStrategy.java](../src/main/java/com/brianxiadong/lsmtree/CompactionStrategy.java) 源码
 - 理解多路归并算法
 - 分析压缩触发条件
 
@@ -301,13 +301,13 @@ public class CompactionPerformanceAnalysis {
 
 #### 3.8.1 理论学习 (2 小时)
 
-- 阅读 `docs/soucrce-code-analysis.md` 第 3.7 节
-- 阅读 `tutorials/08-lsm-tree-main.md`
+- 阅读 [docs/soucrce-code-analysis.md](../docs/soucrce-code-analysis.md) 第 3.7 节
+- 阅读 [tutorials/08-lsm-tree-main.md](../tutorials/08-lsm-tree-main.md)
 - 理解组件协调和并发控制机制
 
 #### 3.8.2 代码阅读 (1-2 小时)
 
-- 深入阅读 `LSMTree.java` 源码
+- 深入阅读 [LSMTree.java](../src/main/java/com/brianxiadong/lsmtree/LSMTree.java) 源码
 - 理解读写锁的使用
 - 分析写入和查询流程
 
@@ -335,17 +335,15 @@ public class ConcurrencyBenchmark {
 
 ### 3.9 第 9 天：性能基准测试与分析
 
-#### 3.9.1 理论学习 (1 小时)
+#### 3.9.1 理论学习 (1-2 小时)
 
-- 阅读 `README.md` 性能基准测试部分
-- 理解各种性能指标的含义
-- 学习性能测试方法论
+- 阅读 [docs/performance-analysis-guide.md](../docs/performance-analysis-guide.md) 第 1-2 节
+- 理解性能分析的基本方法论
 
-#### 3.9.2 代码阅读 (1 小时)
+#### 3.9.2 工具学习 (1 小时)
 
-- 阅读现有的基准测试代码
-- 理解测试场景设计
-- 分析性能数据收集方法
+- 学习 JProfiler 的基本使用
+- 学习 [test-suite/](../test-suite/) 性能测试工具
 
 #### 3.9.3 动手实践 (3 小时)
 
@@ -386,17 +384,15 @@ public class EndToEndPerformanceAnalysis {
 
 ### 3.10 第 10 天：完整应用场景实践
 
-#### 3.10.1 理论学习 (1 小时)
+#### 3.10.1 理论学习 (1-2 小时)
 
-- 阅读应用场景相关文档
-- 理解 LSM Tree 的适用场景
-- 学习最佳实践
+- 阅读 [docs/performance-analysis-guide.md](../docs/performance-analysis-guide.md) 第 3-4 节
+- 理解 JVM 内存管理和 GC 原理
 
-#### 3.10.2 代码阅读 (1 小时)
+#### 3.10.2 工具学习 (1 小时)
 
-- 研究完整的应用示例
-- 理解配置参数的选择
-- 分析错误处理机制
+- 学习 JVisualVM 的使用
+- 学习 test-suite 内存测试工具
 
 #### 3.10.3 动手实践 (3-4 小时)
 
@@ -422,17 +418,14 @@ public class TimeSeriesDB {
 
 ### 3.11 第 11 天：扩展功能开发 - Range 查询
 
-#### 3.11.1 理论学习 (1 小时)
+#### 3.11.1 理论学习 (1-2 小时)
 
-- 研究 Range 查询的设计需求
-- 理解有序存储的优势
-- 学习迭代器模式
+- 阅读 [docs/performance-analysis-guide.md](../docs/performance-analysis-guide.md) 第 5-6 节
+- 理解压力测试的设计原理
 
-#### 3.11.2 代码阅读 (1 小时)
+#### 3.11.2 工具学习 (1 小时)
 
-- 分析现有代码的扩展点
-- 理解数据遍历机制
-- 设计 Range 查询接口
+- 学习 test-suite 压力测试工具
 
 #### 3.11.3 动手实践 (4 小时)
 
@@ -458,14 +451,14 @@ public class RangeQuery {
 
 ### 3.12 第 12 天：扩展功能开发 - 数据压缩
 
-#### 3.12.1 理论学习 (1 小时)
+#### 3.12.1 理论学习 (1-2 小时)
 
-- 研究数据压缩算法
-- 理解压缩率 vs 性能权衡
-- 学习 Snappy/LZ4 算法特点
+- 阅读 [docs/performance-analysis-guide.md](../docs/performance-analysis-guide.md) 第 7-8 节
+- 理解高级优化技术
 
-#### 3.12.2 代码阅读 (1 小时)
+#### 3.12.2 代码分析 (1 小时)
 
+- 使用性能分析工具定位瓶颈
 - 分析 SSTable 的扩展点
 - 设计压缩接口
 - 理解序列化机制
@@ -494,11 +487,10 @@ public class CompressionSupport {
 
 ### 3.13 第 13 天：监控与运维功能
 
-#### 3.13.1 理论学习 (1 小时)
+#### 3.13.1 理论学习 (1-2 小时)
 
-- 学习系统监控指标设计
-- 理解运维工具的重要性
-- 研究 JMX 监控机制
+- 阅读 [docs/performance-analysis-guide.md](../docs/performance-analysis-guide.md) 第 9-10 节
+- 理解生产环境的特殊要求
 
 #### 3.13.2 代码阅读 (1 小时)
 
@@ -532,13 +524,12 @@ public class LSMTreeMonitor {
 
 #### 3.14.1 理论学习 (2 小时)
 
-- 回顾 LSM Tree 核心概念
-- 总结学习收获
-- 规划进阶学习方向
+- 阅读 [docs/performance-analysis-guide.md](../docs/performance-analysis-guide.md) 第 11-12 节
+- 总结 LSM Tree 的核心设计思想
 
-#### 3.14.2 代码阅读 (1 小时)
+#### 3.14.2 代码回顾 (1 小时)
 
-- 回顾关键代码实现
+- 回顾所有核心组件的实现
 - 整理代码笔记
 - 识别改进机会
 
@@ -581,7 +572,7 @@ public class PerformanceAnalysisSummary {
 
 ---
 
-## 4. 后续开发任务 (基于 README 分析)
+## 4. 后续开发任务
 
 ### 4.1 高级功能扩展
 
@@ -604,18 +595,21 @@ public class PerformanceAnalysisSummary {
 3. **数据迁移** - 支持数据导入导出和迁移
 4. **安全机制** - 访问控制和数据加密
 
+---
+
 ## 5. 学习资源
 
 ### 5.1 必读文档
 
-- `docs/lsm-tree-intro.md` - LSM Tree 基础理论
-- `docs/soucrce-code-analysis.md` - 源码详细解析
-- `docs/performance-analysis-guide.md` - 性能分析指南 (新增)
-- `tutorials/` 目录下的所有教程
+- [README.md](../README.md) - 项目概述和快速开始
+- [docs/lsm-tree-intro.md](../docs/lsm-tree-intro.md) - LSM Tree 基础理论
+- [docs/soucrce-code-analysis.md](../docs/soucrce-code-analysis.md) - 源码分析指南
+- [docs/performance-analysis-guide.md](../docs/performance-analysis-guide.md) - 性能分析指南
+- [tutorials/](../tutorials/) 目录下的所有教程文件
 
 ### 5.2 性能分析专项资源
 
-- **性能分析指南**: `docs/performance-analysis-guide.md` 提供了完整的性能分析方法论
+- **性能分析指南**: [docs/performance-analysis-guide.md](../docs/performance-analysis-guide.md) 提供了完整的性能分析方法论
 - **JMH 官方文档**: [OpenJDK JMH](https://openjdk.java.net/projects/code-tools/jmh/)
 - **JProfiler 用户指南**: [JProfiler Documentation](https://www.ej-technologies.com/resources/jprofiler/help/doc/)
 - **VisualVM 教程**: [VisualVM Documentation](https://visualvm.github.io/documentation.html)
