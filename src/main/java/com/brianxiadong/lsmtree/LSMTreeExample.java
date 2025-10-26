@@ -7,7 +7,8 @@ import java.io.IOException;
  */
 public class LSMTreeExample {
     public static void main(String[] args) {
-        String dataDir = "lsm_data";
+        // 支持通过命令行参数指定数据目录，默认为 "lsm_data"
+        String dataDir = args.length > 0 ? args[0] : "lsm_data";
 
         try (LSMTree lsmTree = new LSMTree(dataDir, 1000)) {
 
