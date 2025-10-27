@@ -6,9 +6,9 @@
 
 一个用 Java 实现的 Log-Structured Merge Tree (LSM Tree)数据结构，包含所有 LSM Tree 的核心特性。
 
-## 特性
+## 1. 特性
 
-### 核心 LSM Tree 组件
+### 1.1 核心 LSM Tree 组件
 
 - **MemTable**: 内存中的有序数据结构，使用跳表实现
 - **SSTable**: 磁盘上的有序不可变文件
@@ -16,7 +16,7 @@
 - **布隆过滤器**: 快速判断键是否可能存在
 - **压缩策略**: 多级合并压缩，优化存储和查询性能
 
-### 主要功能
+### 1.2 主要功能
 
 - ✅ **高性能写入**: O(log N) 写入性能
 - ✅ **高效查询**: 结合内存和磁盘的多层查询
@@ -25,16 +25,18 @@
 - ✅ **并发安全**: 读写锁保证线程安全
 - ✅ **空间优化**: 布隆过滤器减少无效磁盘 IO
 
-## 架构设计
+---
 
-### LSM Tree 结构
+## 2. 架构设计
+
+### 2.1 LSM Tree 结构
 
 ```text
 写入流程: Write -> WAL -> MemTable -> (满了) -> SSTable
 查询流程: MemTable -> Immutable MemTables -> SSTables (按时间倒序)
 ```
 
-### 分层压缩
+### 2.2 分层压缩
 
 ```text
 Level 0: [SSTable] [SSTable] [SSTable] [SSTable]  (4个文件时触发压缩)
@@ -43,22 +45,37 @@ Level 2: [SSTable] [SSTable] ... (400个文件时触发压缩)
 ...
 ```
 
-## 快速开始
+## 3. 快速开始
 
-### 环境要求
+### 3.1 环境要求
 
 - Java 8 或更高版本
 - Maven 3.6 或更高版本
 
-### 安装和构建
+### 3.2 安装和构建
 
 ```bash
+# 克隆项目
 git clone https://github.com/brianxiadong/java-lsm-tree.git
 cd java-lsm-tree
+
+# 使用构建脚本 (推荐)
+./build.sh
+
+# 或者查看构建选项
+./build.sh help
+
+# 传统 Maven 构建
 mvn clean compile
+
+# 运行测试
+mvn test
+
+# 打包
+mvn package
 ```
 
-### 基本使用
+### 3.3 基本使用
 
 ```java
 import com.brianxiadong.lsmtree.LSMTree;
@@ -68,59 +85,115 @@ try (LSMTree lsmTree = new LSMTree("data", 1000)) {
     // 插入数据
     lsmTree.put("user:1", "Alice");
     lsmTree.put("user:2", "Bob");
-
+    
     // 查询数据
     String value = lsmTree.get("user:1"); // 返回 "Alice"
-
+    
     // 更新数据
     lsmTree.put("user:1", "Alice Updated");
-
+    
     // 删除数据
     lsmTree.delete("user:2");
-
+    
     // 强制刷盘
     lsmTree.flush();
-
+    
     // 获取统计信息
     LSMTree.LSMTreeStats stats = lsmTree.getStats();
     System.out.println(stats);
 }
 ```
 
-### 运行示例
+### 3.4 运行示例
 
 ```bash
+# 运行示例程序
+java -cp target/java-lsm-tree-1.0.0.jar com.brianxiadong.lsmtree.examples.BasicExample
+
+# 运行性能测试
+java -cp target/java-lsm-tree-1.0.0.jar com.brianxiadong.lsmtree.examples.PerformanceExample
+
+# 或使用Maven执行
 mvn exec:java -Dexec.mainClass="com.brianxiadong.lsmtree.LSMTreeExample"
 ```
 
-### 运行测试
+### 3.5 运行测试
 
 ```bash
+# 使用测试套件 (推荐)
+./test-suite/test-suite.sh all
+
+# 运行特定类型的测试
+./test-suite/test-suite.sh functional    # 功能测试
+./test-suite/test-suite.sh performance   # 性能测试
+./test-suite/test-suite.sh memory        # 内存测试
+./test-suite/test-suite.sh stress        # 压力测试
+
+# 查看测试结果
+./test-suite/test-suite.sh list          # 列出所有测试会话
+./test-suite/test-suite.sh show latest   # 显示最新测试结果
+
+# 传统 Maven 测试
 mvn test
+
+# 运行特定测试类
+mvn test -Dtest=LSMTreeTest
+
+# 运行性能测试
+mvn test -Dtest=PerformanceTest
 ```
 
-### 运行性能基准测试
+### 3.6 运行性能基准测试
+
+#### 3.6.1 使用测试套件 (推荐)
 
 ```bash
-# 使用JUnit基准测试
-mvn test -Dtest=LSMTreeBenchmark
+# 运行性能基准测试
+./test-suite/test-suite.sh performance
 
-# 或直接运行基准测试程序
-mvn exec:java -Dexec.mainClass="com.brianxiadong.lsmtree.BenchmarkRunner"
+# 查看性能测试结果
+./test-suite/test-suite.sh show latest
 ```
 
-## 性能基准测试
+#### 3.6.2 使用 JUnit 测试
+
+```bash
+# 运行性能基准测试
+mvn test -Dtest=BenchmarkTest
+
+# 查看测试报告
+open target/surefire-reports/TEST-com.brianxiadong.lsmtree.BenchmarkTest.xml
+```
+
+#### 3.6.3 直接运行基准测试
+
+```bash
+# 运行完整基准测试套件
+java -cp target/java-lsm-tree-1.0.0.jar com.brianxiadong.lsmtree.BenchmarkRunner
+
+# 使用自定义参数
+java -cp target/java-lsm-tree-1.0.0.jar com.brianxiadong.lsmtree.BenchmarkRunner \
+  --operations 50000 \
+  --threads 4 \
+  --key-size 32 \
+  --value-size 200 \
+  --data-dir ./benchmark_data
+```
+
+---
+
+## 4. 性能基准测试
 
 在现代硬件环境下的性能表现 (Java 8, SSD):
 
-### 写入性能 (ops/sec)
+### 4.1 写入性能 (ops/sec)
 
 | 测试类型 | 1K 数据量 | 5K 数据量 | 10K 数据量 | 50K 数据量 |
 | -------- | --------- | --------- | ---------- | ---------- |
 | 顺序写入 | 715,137   | 706,664   | 441,486    | 453,698    |
 | 随机写入 | 303,479   | 573,723   | 393,951    | 453,400    |
 
-### 读取性能 (ops/sec)
+### 4.2 读取性能 (ops/sec)
 
 | 读取量 | 吞吐量 | 命中率 |
 | ------ | ------ | ------ |
@@ -128,14 +201,14 @@ mvn exec:java -Dexec.mainClass="com.brianxiadong.lsmtree.BenchmarkRunner"
 | 5,000  | 3,475  | 100%   |
 | 10,000 | 3,533  | 100%   |
 
-### 混合工作负载 (70%读 + 30%写)
+### 4.3 混合工作负载 (70%读 + 30%写)
 
 - **总操作数**: 20,000
 - **整体吞吐量**: 4,473 ops/sec
 - **读操作**: 14,092 (命中率: 100%)
 - **写操作**: 5,908
 
-### 延迟分布 (微秒)
+### 4.4 延迟分布 (微秒)
 
 - **平均延迟**: 1.8μs
 - **中位数**: 1.3μs
@@ -143,30 +216,32 @@ mvn exec:java -Dexec.mainClass="com.brianxiadong.lsmtree.BenchmarkRunner"
 - **P99**: 1.9μs
 - **最大延迟**: 4,248.3μs
 
-### 批量加载性能
+### 4.5 批量加载性能
 
 - **数据量**: 100,000 条记录
 - **平均吞吐量**: 413,902 ops/sec
 - **总耗时**: 241.60ms
 
-### MemTable 刷盘影响
+### 4.6 MemTable 刷盘影响
 
 - **正常场景**: ~400K ops/sec
 - **频繁刷盘**: 72,210 ops/sec (MemTable 大小=100)
 - **性能下降**: ~82% (由于频繁磁盘 I/O)
 
-### 性能特征总结
+### 4.7 性能特征总结
 
 ✅ **写优化设计**: 写入性能达到 40 万 ops/sec 级别  
 ✅ **低延迟写入**: 平均 1.8 微秒，99%请求在 2 微秒内完成  
 ✅ **可预测性能**: 大数据量下性能保持稳定  
 ⚠️ **读性能权衡**: 读取性能约为写入的 1/100，符合 LSM Tree 特性
 
-## 使用指南
+---
 
-### 1. 基本集成
+## 5. 使用指南
 
-#### 添加依赖
+### 5.1 基本集成
+
+#### 5.1.1 添加依赖
 
 将项目作为依赖添加到你的 Maven 项目：
 
@@ -185,7 +260,7 @@ git clone https://github.com/brianxiadong/java-lsm-tree.git
 mvn clean install
 ```
 
-#### 最简使用
+#### 5.1.2 最简使用
 
 ```java
 import com.brianxiadong.lsmtree.LSMTree;
@@ -207,9 +282,9 @@ public class QuickStart {
 }
 ```
 
-### 2. 配置优化
+### 5.2 配置优化
 
-#### 性能调优参数
+#### 5.2.1 性能调优参数
 
 ```java
 // 根据应用场景调整MemTable大小
@@ -218,15 +293,15 @@ LSMTree lowLatencyDB = new LSMTree("./low_latency", 1000); // 低延迟场景
 LSMTree balancedDB = new LSMTree("./balanced", 10000);     // 平衡场景
 ```
 
-#### MemTable 大小选择指南
+#### 5.2.2 MemTable 大小选择指南
 
 - **小 MemTable (1K-5K)**: 低内存占用，但频繁刷盘
 - **中等 MemTable (10K-20K)**: 平衡内存和性能
 - **大 MemTable (50K+)**: 高写入吞吐量，需要更多内存
 
-### 3. 实际应用场景
+### 5.3 实际应用场景
 
-#### 缓存系统
+#### 5.3.1 缓存系统
 
 ```java
 public class CacheService {
@@ -261,7 +336,7 @@ public class CacheService {
 }
 ```
 
-#### 时序数据存储
+#### 5.3.2 时序数据存储
 
 ```java
 public class TimeSeriesDB {
@@ -283,7 +358,7 @@ public class TimeSeriesDB {
 }
 ```
 
-#### 用户会话存储
+#### 5.3.3 用户会话存储
 
 ```java
 public class SessionStore {
@@ -313,9 +388,9 @@ public class SessionStore {
 }
 ```
 
-### 4. 监控和维护
+### 5.4 监控和维护
 
-#### 性能监控
+#### 5.4.1 性能监控
 
 ```java
 public void monitorPerformance(LSMTree db) throws IOException {
@@ -337,7 +412,7 @@ public void monitorPerformance(LSMTree db) throws IOException {
 }
 ```
 
-#### 手动维护操作
+#### 5.4.2 手动维护操作
 
 ```java
 public void maintenance(LSMTree db) throws IOException {
@@ -357,9 +432,9 @@ private void logStats(LSMTree.LSMTreeStats stats) {
 }
 ```
 
-### 5. 最佳实践
+### 5.5 最佳实践
 
-#### 错误处理
+#### 5.5.1 错误处理
 
 ```java
 public class SafeLSMWrapper {
@@ -401,7 +476,7 @@ public class SafeLSMWrapper {
 }
 ```
 
-#### 资源管理
+#### 5.5.2 资源管理
 
 ```java
 // 推荐: 使用try-with-resources
@@ -426,9 +501,47 @@ try {
 }
 ```
 
-## 核心组件详解
+## 6. 文档指南
 
-### 1. KeyValue
+### 6.1 📚 完整文档
+
+- **[基准测试指南](docs/benchmark-guide.md)** - 详细的性能测试说明
+- **[数据库分析工具](docs/db-analyzer-guide.md)** - SSTable 和 WAL 分析工具使用指南
+- **[性能分析指南](docs/performance-analysis-guide.md)** - 性能优化和调试指南
+- **[LSM Tree 深度解析](docs/lsm-tree-deep-dive.md)** - LSM Tree 架构和实现详解
+- **[源码分析文档](docs/soucrce-code-analysis.md)** - 源码结构和设计分析
+- **[测试套件使用说明](test-suite/README.md)** - 完整测试套件使用指南
+
+### 6.2 分析工具
+
+```bash
+# SSTable 文件分析
+./analyze-db.sh [选项] <SSTable文件路径>
+
+# WAL 文件分析
+./analyze-wal.sh [选项] <WAL文件路径>
+
+# 查看工具帮助
+./analyze-db.sh --help
+./analyze-wal.sh --help
+```
+
+### 6.3 学习资源
+
+- [教程目录](tutorials/) - 分步骤学习教程
+- [学习计划](learn/) - 结构化学习计划和总结
+
+### 6.4 🚀 快速链接
+
+- **性能测试**: 使用 `BenchmarkRunner` 进行性能基准测试
+- **数据分析**: 使用 `DatabaseAnalyzer` 分析数据库状态
+- **性能调优**: 参考性能分析指南优化配置
+
+---
+
+## 7. 核心组件详解
+
+### 7.1 KeyValue
 
 ```java
 // 基础数据结构，包含键、值、时间戳和删除标记
@@ -436,7 +549,7 @@ KeyValue kv = new KeyValue("key", "value");
 KeyValue tombstone = KeyValue.createTombstone("key"); // 删除标记
 ```
 
-### 2. MemTable
+### 7.2 MemTable
 
 ```java
 // 内存中的有序表，基于跳表实现
@@ -445,7 +558,7 @@ memTable.put("key", "value");
 String value = memTable.get("key");
 ```
 
-### 3. SSTable
+### 7.3 SSTable
 
 ```java
 // 磁盘上的有序文件
@@ -454,7 +567,7 @@ SSTable ssTable = new SSTable("data/table.db", sortedData);
 String value = ssTable.get("key");
 ```
 
-### 4. BloomFilter
+### 7.4 BloomFilter
 
 ```java
 // 布隆过滤器，快速过滤不存在的键
@@ -463,7 +576,7 @@ filter.add("key");
 boolean mightExist = filter.mightContain("key");
 ```
 
-### 5. WAL (Write-Ahead Log)
+### 7.5 WAL (Write-Ahead Log)
 
 ```java
 // 写前日志，确保数据持久性
@@ -472,28 +585,30 @@ wal.append(WriteAheadLog.LogEntry.put("key", "value"));
 List<WriteAheadLog.LogEntry> entries = wal.recover();
 ```
 
-## 性能特征
+---
 
-### 时间复杂度
+## 8. 性能特征
+
+### 8.1 时间复杂度
 
 - **写入**: O(log N) - MemTable 跳表插入
 - **查询**: O(log N + K) - N 为 MemTable 大小，K 为 SSTable 数量
 - **删除**: O(log N) - 插入删除标记
 
-### 空间复杂度
+### 8.2 空间复杂度
 
 - **内存**: MemTable + 索引 + 布隆过滤器
 - **磁盘**: SSTable 文件 + WAL 日志
 
-### 压缩策略
+### 8.3 压缩策略
 
 - **分层压缩**: Level-based compaction
 - **触发条件**: 每层文件数量超过阈值
 - **合并算法**: 多路归并排序 + 去重
 
-## 配置参数
+## 9. 配置参数
 
-### LSMTree 构造参数
+### 9.1 LSMTree 构造参数
 
 ```java
 LSMTree(String dataDir, int memTableMaxSize)
@@ -502,7 +617,7 @@ LSMTree(String dataDir, int memTableMaxSize)
 - `dataDir`: 数据存储目录
 - `memTableMaxSize`: MemTable 最大条目数
 
-### 压缩策略配置
+### 9.2 压缩策略配置
 
 ```java
 CompactionStrategy(String dataDir, int maxLevelSize, int levelSizeMultiplier)
@@ -511,33 +626,58 @@ CompactionStrategy(String dataDir, int maxLevelSize, int levelSizeMultiplier)
 - `maxLevelSize`: Level 0 最大文件数 (默认: 4)
 - `levelSizeMultiplier`: 级别大小倍数 (默认: 10)
 
-## 项目结构
+## 10. 项目结构
 
 ```text
-src/
-├── main/java/com/brianxiadong/lsmtree/
-│   ├── LSMTree.java              # 主要LSM Tree实现
-│   ├── KeyValue.java             # 键值对数据结构
-│   ├── MemTable.java             # 内存表
-│   ├── SSTable.java              # 磁盘表
-│   ├── BloomFilter.java          # 布隆过滤器
-│   ├── WriteAheadLog.java        # 写前日志
-│   ├── CompactionStrategy.java   # 压缩策略
-│   └── LSMTreeExample.java       # 使用示例
-└── test/java/com/brianxiadong/lsmtree/
-    └── LSMTreeTest.java          # 单元测试
+java-lsm-tree/
+├── src/
+│   ├── main/java/com/brianxiadong/lsmtree/
+│   │   ├── LSMTree.java           # 主要的LSM Tree实现
+│   │   ├── MemTable.java          # 内存表实现
+│   │   ├── SSTable.java           # 排序字符串表实现
+│   │   ├── BloomFilter.java       # 布隆过滤器实现
+│   │   ├── WAL.java               # 预写日志实现
+│   │   ├── Compaction.java        # 压缩策略实现
+│   │   ├── BenchmarkRunner.java   # 性能基准测试工具
+│   │   └── utils/                 # 工具类
+│   └── test/java/                 # 测试代码
+├── docs/                          # 完整文档
+│   ├── lsm-tree-intro.md         # LSM Tree 介绍
+│   ├── lsm-tree-deep-dive.md     # 深度技术解析
+│   ├── benchmark-guide.md        # 基准测试指南
+│   ├── db-analyzer-guide.md      # 数据库分析工具指南
+│   ├── performance-analysis-guide.md # 性能分析指南
+│   └── soucrce-code-analysis.md  # 源码分析
+├── tutorials/                     # 学习教程
+│   ├── README.md                 # 教程目录
+│   ├── 01-lsm-tree-overview.md   # LSM Tree 概览
+│   ├── 08-lsm-tree-main.md       # 核心实现教程
+│   └── ...                       # 其他教程文件
+├── learn/                         # 学习计划和总结
+│   ├── learning-plan.md          # 学习计划
+│   └── 学习计划第一天完成总结.md    # 学习总结
+├── test-suite/                    # 完整测试套件
+│   ├── test-suite.sh             # 测试套件主脚本
+│   ├── README.md                 # 测试套件说明
+│   ├── common.sh                 # 通用函数库
+│   └── session.sh                # 会话管理
+├── analyze-db.sh                  # SSTable 分析工具
+├── analyze-wal.sh                 # WAL 分析工具
+├── build.sh                       # 构建脚本
+├── pom.xml                        # Maven配置
+└── README.md                      # 项目说明
 ```
 
-## 技术细节
+## 11. 技术细节
 
-### WAL 格式
+### 11.1 WAL 格式
 
 ```text
 PUT|key|value|timestamp
 DELETE|key||timestamp
 ```
 
-### SSTable 文件格式
+### 11.2 SSTable 文件格式
 
 ```text
 [Entry Count: 4 bytes]
@@ -546,21 +686,21 @@ DELETE|key||timestamp
 [Sparse Index: Variable]
 ```
 
-### 布隆过滤器
+### 11.3 布隆过滤器
 
 - 使用 Double Hashing 避免多个哈希函数
 - 可配置误报率 (默认: 1%)
 - 支持序列化/反序列化
 
-### 并发控制
+### 11.4 并发控制
 
 - 使用 ReadWriteLock 实现读写分离
 - 写操作互斥，读操作并发
 - WAL 写入同步，确保持久性
 
-## 扩展功能
+## 12. 扩展功能
 
-### 已实现
+### 12.1 已实现
 
 - [x] 基础 CRUD 操作
 - [x] WAL 日志恢复
@@ -569,7 +709,7 @@ DELETE|key||timestamp
 - [x] 统计信息
 - [x] 并发安全
 
-### 计划中
+### 12.2 计划中
 
 - [ ] Range 查询支持
 - [ ] 数据压缩 (Snappy/LZ4)
@@ -577,7 +717,7 @@ DELETE|key||timestamp
 - [ ] 监控和度量
 - [ ] 分区支持
 
-## 贡献
+## 13. 贡献
 
 欢迎贡献代码！请遵循以下步骤：
 
@@ -587,17 +727,17 @@ DELETE|key||timestamp
 4. 推送到分支 (`git push origin feature/AmazingFeature`)
 5. 创建 Pull Request
 
-## 许可证
+## 14. 许可证
 
 本项目采用 Apache 2.0 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情
 
-## 参考资料
+## 15. 参考资料
 
 - [The Log-Structured Merge-Tree (LSM-Tree)](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.44.2782&rep=rep1&type=pdf)
 - [LevelDB Documentation](https://github.com/google/leveldb/blob/main/doc/index.md)
 - [RocksDB Wiki](https://github.com/facebook/rocksdb/wiki)
 
-## 作者
+## 16. 作者
 
 **Brian Xia Dong** - [brianxiadong](https://github.com/brianxiadong)
 
