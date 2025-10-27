@@ -2,13 +2,39 @@
 
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
 ![Java](https://img.shields.io/badge/java-8+-orange.svg)
-![Maven](https://img.shields.io/badge/maven-3.6+-green.svg)
+![Maven](https://img.shields.io/badge/maven-3.8+-green.svg)
 
 一个用 Java 实现的 Log-Structured Merge Tree (LSM Tree)数据结构，包含所有 LSM Tree 的核心特性。
 
-## 1. 特性
+## 1. LSM Tree 简介
 
-### 1.1 核心 LSM Tree 组件
+### 1.1 什么是 LSM Tree
+
+LSM Tree（Log-Structured Merge Tree）是一种专为写密集型工作负载优化的数据结构，最早由 Patrick O'Neil 等人在 1996 年的经典论文中提出。LSM Tree 的核心思想是**将随机写入转换为顺序写入**，从而充分利用磁盘的顺序访问性能优势。
+
+### 1.2 核心设计思想
+
+传统的 B+Tree 结构在处理大量写入操作时，由于需要维护树结构的平衡性，往往产生大量的随机 I/O 操作，导致性能瓶颈。LSM Tree 通过以下设计解决了这个问题：
+
+- **分层存储架构**：将数据分为内存层和磁盘层，新数据首先写入内存，然后批量刷写到磁盘
+- **顺序写入优化**：所有磁盘写入都是顺序的，避免了随机 I/O 的性能损失
+- **Rolling Merge 算法**：通过后台的合并过程，将小文件逐步合并为大文件，保持数据的有序性
+
+### 1.3 应用场景
+
+LSM Tree 特别适合以下场景：
+
+- **写密集型应用**：日志系统、时序数据库、监控系统
+- **大数据存储**：分布式数据库、NoSQL 系统
+- **高并发写入**：实时数据采集、事件流处理
+
+现代许多知名系统都采用了 LSM Tree 的核心思想，包括 Google BigTable、LevelDB/RocksDB、Cassandra、HBase 等。
+
+---
+
+## 2. 特性与架构
+
+### 2.1 核心 LSM Tree 组件
 
 - **MemTable**: 内存中的有序数据结构，使用跳表实现
 - **SSTable**: 磁盘上的有序不可变文件
@@ -16,7 +42,7 @@
 - **布隆过滤器**: 快速判断键是否可能存在
 - **压缩策略**: 多级合并压缩，优化存储和查询性能
 
-### 1.2 主要功能
+### 2.2 主要功能
 
 - ✅ **高性能写入**: O(log N) 写入性能
 - ✅ **高效查询**: 结合内存和磁盘的多层查询
@@ -25,18 +51,16 @@
 - ✅ **并发安全**: 读写锁保证线程安全
 - ✅ **空间优化**: 布隆过滤器减少无效磁盘 IO
 
----
+### 2.3 架构设计
 
-## 2. 架构设计
-
-### 2.1 LSM Tree 结构
+#### 2.3.1 LSM Tree 结构
 
 ```text
 写入流程: Write -> WAL -> MemTable -> (满了) -> SSTable
 查询流程: MemTable -> Immutable MemTables -> SSTables (按时间倒序)
 ```
 
-### 2.2 分层压缩
+#### 2.3.2 分层压缩
 
 ```text
 Level 0: [SSTable] [SSTable] [SSTable] [SSTable]  (4个文件时触发压缩)
@@ -44,6 +68,8 @@ Level 1: [SSTable] [SSTable] ... (40个文件时触发压缩)
 Level 2: [SSTable] [SSTable] ... (400个文件时触发压缩)
 ...
 ```
+
+---
 
 ## 3. 快速开始
 
@@ -85,19 +111,19 @@ try (LSMTree lsmTree = new LSMTree("data", 1000)) {
     // 插入数据
     lsmTree.put("user:1", "Alice");
     lsmTree.put("user:2", "Bob");
-    
+
     // 查询数据
     String value = lsmTree.get("user:1"); // 返回 "Alice"
-    
+
     // 更新数据
     lsmTree.put("user:1", "Alice Updated");
-    
+
     // 删除数据
     lsmTree.delete("user:2");
-    
+
     // 强制刷盘
     lsmTree.flush();
-    
+
     // 获取统计信息
     LSMTree.LSMTreeStats stats = lsmTree.getStats();
     System.out.println(stats);
@@ -501,6 +527,8 @@ try {
 }
 ```
 
+---
+
 ## 6. 文档指南
 
 ### 6.1 📚 完整文档
@@ -539,7 +567,7 @@ try {
 
 ---
 
-## 7. 核心组件详解
+## 7. 核心组件与实现细节
 
 ### 7.1 KeyValue
 
@@ -585,30 +613,62 @@ wal.append(WriteAheadLog.LogEntry.put("key", "value"));
 List<WriteAheadLog.LogEntry> entries = wal.recover();
 ```
 
+### 7.6 技术实现细节
+
+#### 7.6.1 WAL 格式
+
+```text
+PUT|key|value|timestamp
+DELETE|key||timestamp
+```
+
+#### 7.6.2 SSTable 文件格式
+
+```text
+[Entry Count: 4 bytes]
+[Data Entries: Variable]
+[Bloom Filter: Variable]
+[Sparse Index: Variable]
+```
+
+#### 7.6.3 布隆过滤器实现
+
+- 使用 Double Hashing 避免多个哈希函数
+- 可配置误报率 (默认: 1%)
+- 支持序列化/反序列化
+
+#### 7.6.4 并发控制
+
+- 使用 ReadWriteLock 实现读写分离
+- 写操作互斥，读操作并发
+- WAL 写入同步，确保持久性
+
 ---
 
-## 8. 性能特征
+## 8. 性能与配置
 
-### 8.1 时间复杂度
+### 8.1 性能特征
+
+#### 8.1.1 时间复杂度
 
 - **写入**: O(log N) - MemTable 跳表插入
 - **查询**: O(log N + K) - N 为 MemTable 大小，K 为 SSTable 数量
 - **删除**: O(log N) - 插入删除标记
 
-### 8.2 空间复杂度
+#### 8.1.2 空间复杂度
 
 - **内存**: MemTable + 索引 + 布隆过滤器
 - **磁盘**: SSTable 文件 + WAL 日志
 
-### 8.3 压缩策略
+#### 8.1.3 压缩策略
 
 - **分层压缩**: Level-based compaction
 - **触发条件**: 每层文件数量超过阈值
 - **合并算法**: 多路归并排序 + 去重
 
-## 9. 配置参数
+### 8.2 配置参数
 
-### 9.1 LSMTree 构造参数
+#### 8.2.1 LSMTree 构造参数
 
 ```java
 LSMTree(String dataDir, int memTableMaxSize)
@@ -617,7 +677,7 @@ LSMTree(String dataDir, int memTableMaxSize)
 - `dataDir`: 数据存储目录
 - `memTableMaxSize`: MemTable 最大条目数
 
-### 9.2 压缩策略配置
+#### 8.2.2 压缩策略配置
 
 ```java
 CompactionStrategy(String dataDir, int maxLevelSize, int levelSizeMultiplier)
@@ -626,7 +686,9 @@ CompactionStrategy(String dataDir, int maxLevelSize, int levelSizeMultiplier)
 - `maxLevelSize`: Level 0 最大文件数 (默认: 4)
 - `levelSizeMultiplier`: 级别大小倍数 (默认: 10)
 
-## 10. 项目结构
+---
+
+## 9. 项目结构
 
 ```text
 java-lsm-tree/
@@ -668,48 +730,20 @@ java-lsm-tree/
 └── README.md                      # 项目说明
 ```
 
-## 11. 技术细节
+---
 
-### 11.1 WAL 格式
+## 10. 扩展功能
 
-```text
-PUT|key|value|timestamp
-DELETE|key||timestamp
-```
+### 10.1 已实现
 
-### 11.2 SSTable 文件格式
+- [✓] 基础 CRUD 操作
+- [✓] WAL 日志恢复
+- [✓] 自动压缩
+- [✓] 布隆过滤器优化
+- [✓] 统计信息
+- [✓] 并发安全
 
-```text
-[Entry Count: 4 bytes]
-[Data Entries: Variable]
-[Bloom Filter: Variable]
-[Sparse Index: Variable]
-```
-
-### 11.3 布隆过滤器
-
-- 使用 Double Hashing 避免多个哈希函数
-- 可配置误报率 (默认: 1%)
-- 支持序列化/反序列化
-
-### 11.4 并发控制
-
-- 使用 ReadWriteLock 实现读写分离
-- 写操作互斥，读操作并发
-- WAL 写入同步，确保持久性
-
-## 12. 扩展功能
-
-### 12.1 已实现
-
-- [x] 基础 CRUD 操作
-- [x] WAL 日志恢复
-- [x] 自动压缩
-- [x] 布隆过滤器优化
-- [x] 统计信息
-- [x] 并发安全
-
-### 12.2 计划中
+### 10.2 计划中
 
 - [ ] Range 查询支持
 - [ ] 数据压缩 (Snappy/LZ4)
@@ -717,7 +751,7 @@ DELETE|key||timestamp
 - [ ] 监控和度量
 - [ ] 分区支持
 
-## 13. 贡献
+## 11. 贡献
 
 欢迎贡献代码！请遵循以下步骤：
 
@@ -727,19 +761,26 @@ DELETE|key||timestamp
 4. 推送到分支 (`git push origin feature/AmazingFeature`)
 5. 创建 Pull Request
 
-## 14. 许可证
+---
+
+## 12. 许可证
 
 本项目采用 Apache 2.0 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情
 
-## 15. 参考资料
+---
+
+## 13. 参考资料
 
 - [The Log-Structured Merge-Tree (LSM-Tree)](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.44.2782&rep=rep1&type=pdf)
 - [LevelDB Documentation](https://github.com/google/leveldb/blob/main/doc/index.md)
 - [RocksDB Wiki](https://github.com/facebook/rocksdb/wiki)
 
-## 16. 作者
+---
 
-**Brian Xia Dong** - [brianxiadong](https://github.com/brianxiadong)
+## 14. 作者
+
+- **Brian Xia Dong** - [brianxiadong](https://github.com/brianxiadong)
+- **Grissom Wang** - [Grissom Wang(AI 原力注入博主)](https://github.com/grissomsh)：本 forked repo 由 Grissom Wang 维护。
 
 ---
 
