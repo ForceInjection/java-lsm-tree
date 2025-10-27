@@ -64,6 +64,9 @@ wal.log
 out/
 build/
 dist/
+results/
+test_data/
+.trae/
 *.orig
 
 # 包管理
