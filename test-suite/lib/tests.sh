@@ -86,10 +86,15 @@ run_performance_benchmarks() {
         
         cd "${SESSION_PERFORMANCE_DIR}"
         
-        # 运行性能基准测试，传递数据目录参数
+        # 运行性能基准测试，使用命名参数格式
         echo "=== 第 ${i} 轮测试 ===" >> "${results_file}"
         java ${JAVA_OPTS} -cp "${JAR_PATH}" \
-            ${MAIN_CLASS}.BenchmarkRunner "benchmark_data_round_${i}" >> "${results_file}" 2>&1
+            ${MAIN_CLASS}.BenchmarkRunner \
+            --operations ${BENCHMARK_OPERATIONS} \
+            --threads ${BENCHMARK_THREADS} \
+            --key-size ${BENCHMARK_KEY_SIZE} \
+            --value-size ${BENCHMARK_VALUE_SIZE} \
+            --data-dir "benchmark_data_round_${i}" >> "${results_file}" 2>&1
         
         local exit_code=$?
         if [ ${exit_code} -eq 0 ]; then
