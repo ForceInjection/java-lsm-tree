@@ -1,0 +1,17 @@
+groups:
+- name: lsm-tree-alerts
+  rules:
+  - alert: HighReadLatency
+    expr: histogram_quantile(0.95, rate(lsm_read_latency_seconds_bucket[5m])) > 0.2
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High P95 read latency"
+  - alert: CompactionFailures
+    expr: increase(lsm_compaction_failures_total[10m]) > 0
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Compaction failures detected"

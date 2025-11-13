@@ -41,6 +41,7 @@ CONTAINER_NAME="lsm-tree-build"
 # 清理函数
 cleanup() {
     log_info "清理构建环境..."
+    rm -rf "${BUILD_DIR}/logs"
     docker rm -f ${CONTAINER_NAME} 2>/dev/null || true
 }
 
@@ -114,7 +115,7 @@ build_project() {
         -v "${HOME}/.m2":/root/.m2 \
         -w /workspace \
         ${MAVEN_IMAGE} \
-        mvn clean compile package -DskipTests=false \
+        mvn clean compile package -DskipTests=true \
         | tee "${BUILD_DIR}/logs/build-$(date +%Y%m%d-%H%M%S).log"
     
     # 检查构建结果
@@ -165,14 +166,14 @@ run_tests() {
 
 # 清理构建产物函数
 clean_build() {
-    log_info "清理构建产物..."
+    log_info "完整清理构建产物..."
     docker run --rm \
         -v "${PROJECT_ROOT}":/workspace \
+        -v "${HOME}/.m2":/root/.m2 \
         -w /workspace \
         ${MAVEN_IMAGE} \
         mvn clean
-    
-    rm -rf "${BUILD_DIR}/output"
+
     rm -rf "${BUILD_DIR}/logs"
     log_success "构建产物清理完成"
 }

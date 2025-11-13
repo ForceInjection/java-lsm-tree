@@ -52,6 +52,10 @@ public class MemTable {
         return kv.getValue();
     }
 
+    public KeyValue getEntry(String key) {
+        return data.get(key);
+    }
+
     /**
      * 检查是否需要刷盘
      */
@@ -66,6 +70,48 @@ public class MemTable {
         return new ArrayList<>(data.values());
     }
 
+    public List<KeyValue> getRange(String startKey, String endKey, boolean includeStart, boolean includeEnd) {
+        ConcurrentSkipListMap<String, KeyValue> m = this.data;
+        String from = startKey;
+        String to = endKey;
+        boolean fromIncl = includeStart;
+        boolean toIncl = includeEnd;
+        List<KeyValue> res = new ArrayList<>();
+        if (from == null && to == null) {
+            for (KeyValue kv : m.values()) if (!kv.isDeleted()) res.add(kv);
+            return res;
+        }
+        if (from == null) {
+            for (KeyValue kv : m.headMap(to, toIncl).values()) if (!kv.isDeleted()) res.add(kv);
+            return res;
+        }
+        if (to == null) {
+            for (KeyValue kv : m.tailMap(from, fromIncl).values()) if (!kv.isDeleted()) res.add(kv);
+            return res;
+        }
+        for (KeyValue kv : m.subMap(from, fromIncl, to, toIncl).values()) if (!kv.isDeleted()) res.add(kv);
+        return res;
+    }
+
+    public List<KeyValue> getRangeEntriesRaw(String startKey, String endKey, boolean includeStart, boolean includeEnd) {
+        ConcurrentSkipListMap<String, KeyValue> m = this.data;
+        List<KeyValue> res = new ArrayList<>();
+        if (startKey == null && endKey == null) {
+            res.addAll(m.values());
+            return res;
+        }
+        if (startKey == null) {
+            res.addAll(m.headMap(endKey, includeEnd).values());
+            return res;
+        }
+        if (endKey == null) {
+            res.addAll(m.tailMap(startKey, includeStart).values());
+            return res;
+        }
+        res.addAll(m.subMap(startKey, includeStart, endKey, includeEnd).values());
+        return res;
+    }
+
     /**
      * 清空内存表
      */
@@ -78,7 +124,7 @@ public class MemTable {
      * 获取当前大小
      */
     public int size() {
-        return currentSize;
+        return data.size();
     }
 
     /**

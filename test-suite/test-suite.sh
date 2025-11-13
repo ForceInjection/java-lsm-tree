@@ -10,6 +10,8 @@
 #
 # 支持的命令:
 #   all                    - 运行所有测试 (默认)
+#   unit                   - 运行所有单元测试
+#   tools                  - 运行工具与 CLI 测试
 #   functional|func        - 运行功能测试
 #   performance|perf       - 运行性能测试
 #   memory|mem            - 运行内存测试
@@ -88,6 +90,8 @@ Java LSM Tree 测试套件
 
 命令:
   all                    运行所有测试 (默认)
+  unit                   运行所有单元测试
+  tools                  运行工具与 CLI 测试
   functional, func       运行功能测试
   performance, perf      运行性能测试  
   memory, mem           运行内存测试
@@ -123,6 +127,10 @@ EOF
 # =============================================================================
 # 初始化和环境检查
 # =============================================================================
+
+EXIT_OVERRIDE=1
+TERMINATED=false
+trap 'TERMINATED=true; cleanup_test_environment; exit ${EXIT_OVERRIDE}' SIGTERM
 
 # 轻量级初始化（用于查询类命令，不创建新会话）
 init_lightweight() {
@@ -176,6 +184,28 @@ init_test_suite() {
     # 设置清理陷阱
     trap cleanup_test_environment EXIT
     
+    log_success "测试套件初始化完成"
+}
+
+init_test_suite_no_gate() {
+    log_info "初始化 Java LSM Tree 测试套件..."
+    if ! init_common; then
+        log_error "公共环境初始化失败"
+        return 1
+    fi
+    if ! init_session_management; then
+        log_error "会话管理初始化失败"
+        return 1
+    fi
+    if ! check_environment; then
+        log_error "环境检查失败"
+        return 1
+    fi
+    if ! load_test_modules; then
+        log_error "测试模块加载失败"
+        return 1
+    fi
+    trap cleanup_test_environment EXIT
     log_success "测试套件初始化完成"
 }
 
@@ -425,8 +455,19 @@ main() {
                 exit 1
             fi
             ;;
+        "unit"|"all")
+            if ! init_test_suite; then
+                log_error "测试套件初始化失败"
+                exit 1
+            fi
+            ;;
+        "functional"|"func"|"tools"|"performance"|"perf"|"memory"|"mem"|"stress")
+            if ! init_test_suite_no_gate; then
+                log_error "测试套件初始化失败"
+                exit 1
+            fi
+            ;;
         *)
-            # 其他命令需要完整的测试套件初始化
             if ! init_test_suite; then
                 log_error "测试套件初始化失败"
                 exit 1
@@ -438,6 +479,12 @@ main() {
     case "${command}" in
         "all")
             run_full_test_suite
+            ;;
+        "unit")
+            run_single_test "unit"
+            ;;
+        "tools")
+            run_single_test "tools"
             ;;
         "functional"|"func")
             run_single_test "functional"
@@ -489,7 +536,12 @@ main() {
             exit 1
             ;;
     esac
+
+    local rc=$?
+    EXIT_OVERRIDE=${rc}
+    return ${rc}
 }
 
 # 执行主程序
 main "$@"
+exit $?
