@@ -127,24 +127,50 @@ test-suite/
 - **可扩展性**: 便于添加新的测试类型和功能
 - **代码复用**: 公共功能统一管理，避免重复
 
+#### 3.3.3 会话数据存储
+
+- **数据隔离**: 所有测试数据完全隔离在会话目录中，避免交叉污染
+- **相对路径**: 使用相对路径配置，确保 Docker 容器内正确访问 session 数据
+- **统一管理**: 测试数据、日志、报告统一存储在会话目录结构中
+- **易于归档**: 完整的会话数据便于整体备份和恢复
+
 ## 4. 测试结果
 
 ### 4.1 结果存储结构
 
-测试完成后，结果将保存在 `results/` 目录中：
+测试完成后，结果将保存在 `results/` 目录中。所有测试数据现在都存储在会话目录中，实现完全的数据隔离：
 
 ```bash
 results/
-├── sessions/                  # 测试会话目录
-│   ├── 20241026_174348/      # 会话ID（时间戳格式）
-│   │   ├── functional_test.log
-│   │   ├── performance_test.log
-│   │   ├── memory_analysis.log
-│   │   ├── stress_test.log
-│   │   ├── test_report.html
-│   │   └── session_info.txt
+├── sessions/                          # 测试会话目录
+│   ├── 20241113_205157/              # 会话ID（时间戳格式）
+│   │   ├── functional/               # 功能测试数据目录
+│   │   │   ├── api/                  # API 测试数据
+│   │   │   ├── api_data/             # API 测试数据库文件
+│   │   │   │   ├── concurrent_ops/   # 并发操作测试数据
+│   │   │   │   ├── delete_ops/       # 删除操作测试数据
+│   │   │   │   ├── memtable_flush/   # MemTable 刷新测试
+│   │   │   │   ├── mixed_workload/   # 混合工作负载测试
+│   │   │   │   ├── random_writes/    # 随机写入测试
+│   │   │   │   ├── range_queries/    # 范围查询测试
+│   │   │   │   ├── reads/            # 读取测试
+│   │   │   │   ├── sequential_writes/ # 顺序写入测试
+│   │   │   │   └── write_latency/    # 写入延迟测试
+│   │   │   ├── example/              # 功能示例数据
+│   │   │   │   └── lsm_data/         # LSM Tree 数据文件 (*.db)
+│   │   │   ├── metrics/              # 性能指标数据
+│   │   │   └── storage/              # 存储测试数据
+│   │   ├── performance/              # 性能测试数据目录
+│   │   │   └── benchmark_data_round_*/ # 性能测试轮次数据
+│   │   ├── stress/                   # 压力测试数据目录
+│   │   │   └── stress_test_data/     # 压力测试数据库文件
+│   │   ├── reports/                  # 测试报告目录
+│   │   │   ├── test_report_*.html    # HTML 测试报告
+│   │   │   └── test_report_*.json    # JSON 测试报告
+│   │   ├── summary.json              # 会话摘要信息
+│   │   └── test_results.json         # 详细测试结果
 │   └── ...
-└── archive/                   # 归档的历史会话
+└── archive/                           # 归档的历史会话
     ├── 20241025_143022/
     └── ...
 ```

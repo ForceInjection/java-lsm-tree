@@ -16,6 +16,77 @@ if [[ -z "${TEST_SESSION_ID}" ]]; then
 fi
 
 # =============================================================================
+# 单元测试
+# =============================================================================
+
+run_unit_tests() {
+    log_test "开始单元测试..."
+    update_test_status "unit" "running"
+    local results_file="${SESSION_DIR}/test_results.json"
+    start_test_category "$results_file" "unit"
+    local unit_dir="${SESSION_UNIT_DIR}"
+    mkdir -p "${unit_dir}"
+    local unit_log="${unit_dir}/unit_test_$(get_timestamp).log"
+    
+    # 运行单元测试并生成覆盖率报告
+    log_info "运行单元测试并生成覆盖率报告..."
+    docker run --rm \
+        -v "${PROJECT_ROOT}":/workspace \
+        -v "${HOME}/.m2":/root/.m2 \
+        -w /workspace \
+        maven:3.8.6-openjdk-8 \
+        mvn -q -DskipTests=false -DfailIfNoTests=false -Dtest.data.base.path="test-suite/results/sessions/${TEST_SESSION_ID}" clean test jacoco:report > "${unit_log}" 2>&1
+    local exit_code=$?
+    
+    # 执行覆盖率门禁检查
+    if ! enforce_coverage_gates; then
+        log_error "覆盖率门禁未通过"
+        exit_code=1
+    fi
+    
+    if [ ${exit_code} -eq 0 ]; then
+        log_success "单元测试通过"
+        record_test_result "$results_file" "unit" "maven_surefire" "PASS"
+    else
+        log_error "单元测试失败 (退出码: ${exit_code})，详情: ${unit_log}"
+        record_test_result "$results_file" "unit" "maven_surefire" "FAIL"
+    fi
+    
+    if [ -d "${PROJECT_ROOT}/target/surefire-reports" ]; then
+        mkdir -p "${unit_dir}/surefire-reports"
+        cp -R "${PROJECT_ROOT}/target/surefire-reports/." "${unit_dir}/surefire-reports/" 2>/dev/null || true
+    fi
+    update_test_status "unit" "completed"
+    complete_test_category "$results_file" "unit" "completed"
+    log_success "单元测试完成"
+}
+
+run_tools_tests() {
+    update_test_status "tools" "running"
+    log_test "开始工具与 CLI 测试..."
+    local results_file="${SESSION_DIR}/test_results.json"
+    start_test_category "$results_file" "tools"
+    local dir="${SESSION_TOOLS_DIR}"
+    mkdir -p "${dir}"
+    local logf="${dir}/tools_test_$(get_timestamp).log"
+    docker run --rm \
+        -v "${PROJECT_ROOT}":/workspace \
+        -v "${HOME}/.m2":/root/.m2 \
+        -w /workspace \
+        maven:3.8.6-openjdk-8 \
+        mvn -q -Dtest=com.brianxiadong.lsmtree.tools.* -DfailIfNoTests=false test > "${logf}" 2>&1
+    local ec=$?
+    if [ ${ec} -eq 0 ]; then
+        record_test_result "$results_file" "tools" "maven_tools" "PASS"
+    else
+        record_test_result "$results_file" "tools" "maven_tools" "FAIL"
+    fi
+    update_test_status "tools" "completed"
+    complete_test_category "$results_file" "tools" "completed"
+    log_success "工具与 CLI 测试完成"
+}
+
+# =============================================================================
 # 功能测试
 # =============================================================================
 
@@ -27,30 +98,81 @@ run_functional_tests() {
     local results_file="${SESSION_DIR}/test_results.json"
     start_test_category "$results_file" "functional"
     
-    # 运行基本功能示例
+    # 准备二级分组目录
+    local functional_example_dir="${SESSION_FUNCTIONAL_DIR}/example"
+    local functional_storage_dir="${SESSION_FUNCTIONAL_DIR}/storage"
+    local functional_metrics_dir="${SESSION_FUNCTIONAL_DIR}/metrics"
+    local functional_api_dir="${SESSION_FUNCTIONAL_DIR}/api"
+    mkdir -p "${functional_example_dir}" "${functional_storage_dir}" "${functional_metrics_dir}" "${functional_api_dir}"
+
+    # 运行基本功能示例（example 分组）
     log_test "运行基本功能示例..."
-    local example_log="${SESSION_FUNCTIONAL_DIR}/example_test_$(get_timestamp).log"
+    local example_log="${functional_example_dir}/example_run_$(get_timestamp).log"
     
-    # 在session功能测试目录中创建测试数据目录
-    local functional_data_dir="${SESSION_FUNCTIONAL_DIR}/lsm_data"
+    # 在 example 分组目录中创建测试数据目录
+    local functional_data_dir="${functional_example_dir}/lsm_data"
     rm -rf "${functional_data_dir}" 2>/dev/null || true
     mkdir -p "${functional_data_dir}"
     
     # 在session功能测试目录运行，传递相对路径作为数据目录
-    cd "${SESSION_FUNCTIONAL_DIR}"
-    java ${JAVA_OPTS} -cp "${JAR_PATH}" \
-        ${MAIN_CLASS}.LSMTreeExample "lsm_data" > "${example_log}" 2>&1
+    cd "${functional_example_dir}"
+    # 使用 Docker 运行 Maven exec 插件，确保所有依赖都可用
+    docker run --rm \
+        -v "${PROJECT_ROOT}":/workspace \
+        -v "${HOME}/.m2":/root/.m2 \
+        -w /workspace \
+        maven:3.8.6-openjdk-8 \
+        bash -lc "timeout ${FUNCTIONAL_EXAMPLE_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.LSMTreeExample' -Dexec.args='test-suite/results/sessions/${TEST_SESSION_ID}/functional/example/lsm_data' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" > "${example_log}" 2>&1
     
     local exit_code=$?
     if [ ${exit_code} -eq 0 ]; then
         log_success "基本功能示例运行成功"
-        record_test_result "$results_file" "functional" "example_test" "PASS"
+        record_test_result "$results_file" "functional" "example.run" "PASS"
     else
         log_error "基本功能示例运行失败 (退出码: ${exit_code})，详细信息请查看: ${example_log}"
-        record_test_result "$results_file" "functional" "example_test" "FAIL"
+        record_test_result "$results_file" "functional" "example.run" "FAIL"
         return 1
     fi
     
+    # storage.basic_io: 检查示例运行后数据目录存在并含有 wal.log
+    if [ -f "${functional_data_dir}/wal.log" ] || ls "${functional_data_dir}"/sstable_* 1>/dev/null 2>&1; then
+        record_test_result "$results_file" "functional" "storage.basic_io" "PASS"
+    else
+        record_test_result "$results_file" "functional" "storage.basic_io" "FAIL"
+    fi
+
+    # metrics.expose: 启用指标开关运行一次程序（不校验网络连通性，仅校验可启动）
+    local metrics_log="${functional_metrics_dir}/metrics_run_$(get_timestamp).log"
+    cd "${functional_metrics_dir}"
+    docker run --rm \
+        -v "${PROJECT_ROOT}":/workspace \
+        -v "${HOME}/.m2":/root/.m2 \
+        -w /workspace \
+        -e MAVEN_OPTS="-Dlsm.metrics.http.enabled=true -Dlsm.metrics.http.port=9093" \
+        maven:3.8.6-openjdk-8 \
+        bash -lc "timeout ${FUNCTIONAL_METRICS_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.LSMTreeExample' -Dexec.args='test-suite/results/sessions/${TEST_SESSION_ID}/functional/example/lsm_data' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" > "${metrics_log}" 2>&1
+    if [ $? -eq 0 ]; then
+        record_test_result "$results_file" "functional" "metrics.expose" "PASS"
+    else
+        record_test_result "$results_file" "functional" "metrics.expose" "FAIL"
+    fi
+
+    # api.put_get: 使用 BenchmarkRunner 以极小规模运行，验证 API 路径可用
+    local api_log="${functional_api_dir}/api_run_$(get_timestamp).log"
+    cd "${functional_api_dir}"
+    docker run --rm \
+        -v "${PROJECT_ROOT}":/workspace \
+        -v "${SESSION_DIR}":/session \
+        -v "${HOME}/.m2":/root/.m2 \
+        -w /workspace \
+        maven:3.8.6-openjdk-8 \
+        bash -lc "timeout ${FUNCTIONAL_API_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.BenchmarkRunner' -Dexec.args='--operations 50 --threads 1 --key-size 8 --value-size 16 --data-dir test-suite/results/sessions/${TEST_SESSION_ID}/functional/api_data' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" > "${api_log}" 2>&1
+    if [ $? -eq 0 ]; then
+        record_test_result "$results_file" "functional" "api.put_get" "PASS"
+    else
+        record_test_result "$results_file" "functional" "api.put_get" "FAIL"
+    fi
+
     update_test_status "functional" "completed"
     complete_test_category "$results_file" "functional" "completed"
     log_success "功能测试完成"
@@ -88,13 +210,12 @@ run_performance_benchmarks() {
         
         # 运行性能基准测试，使用命名参数格式
         echo "=== 第 ${i} 轮测试 ===" >> "${results_file}"
-        java ${JAVA_OPTS} -cp "${JAR_PATH}" \
-            ${MAIN_CLASS}.BenchmarkRunner \
-            --operations ${BENCHMARK_OPERATIONS} \
-            --threads ${BENCHMARK_THREADS} \
-            --key-size ${BENCHMARK_KEY_SIZE} \
-            --value-size ${BENCHMARK_VALUE_SIZE} \
-            --data-dir "benchmark_data_round_${i}" >> "${results_file}" 2>&1
+        docker run --rm \
+            -v "${PROJECT_ROOT}":/workspace \
+            -v "${HOME}/.m2":/root/.m2 \
+            -w /workspace \
+            maven:3.8.6-openjdk-8 \
+            bash -lc "timeout ${PERFORMANCE_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.BenchmarkRunner' -Dexec.args='--operations ${BENCHMARK_OPERATIONS} --threads ${BENCHMARK_THREADS} --key-size ${BENCHMARK_KEY_SIZE} --value-size ${BENCHMARK_VALUE_SIZE} --data-dir test-suite/results/sessions/${TEST_SESSION_ID}/performance/benchmark_data_round_${i}' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" >> "${results_file}" 2>&1
         
         local exit_code=$?
         if [ ${exit_code} -eq 0 ]; then
@@ -164,11 +285,13 @@ run_memory_tests() {
     
     cd "${SESSION_MEMORY_DIR}"
     
-    # 运行内存测试
     log_test "运行内存使用分析..."
-    java ${JAVA_OPTS} -Xlog:gc:${memory_log} \
-        -cp "${JAR_PATH}" ${MAIN_CLASS}.LSMTreeExample "lsm_data" \
-        >> "${memory_log}" 2>&1
+    docker run --rm \
+        -v "${PROJECT_ROOT}":/workspace \
+        -v "${HOME}/.m2":/root/.m2 \
+        -w /workspace \
+        maven:3.8.6-openjdk-8 \
+        bash -lc "timeout ${MEMORY_TIMEOUT}s mvn -q exec:java -Dexec.mainClass='${MAIN_CLASS}.LSMTreeExample' -Dexec.args='test-suite/results/sessions/${TEST_SESSION_ID}/memory/lsm_data' -Dexec.jvmArgs='-Xlog:gc:${memory_log} ${JAVA_OPTS}' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" >> "${memory_log}" 2>&1
     
     local exit_code=$?
     if [ ${exit_code} -eq 0 ]; then
@@ -228,8 +351,12 @@ run_stress_tests() {
     # 设置压力测试的JVM参数
     local stress_java_opts="-Xmx1g -Xms512m -XX:+UseG1GC -XX:+PrintGCDetails"
     
-    java ${stress_java_opts} -cp "${JAR_PATH}" \
-        ${MAIN_CLASS}.LSMTreeExample "stress_test_data" > "${stress_log}" 2>&1
+    docker run --rm \
+        -v "${PROJECT_ROOT}":/workspace \
+        -v "${HOME}/.m2":/root/.m2 \
+        -w /workspace \
+        maven:3.8.6-openjdk-8 \
+        bash -lc "timeout ${STRESS_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.LSMTreeExample' -Dexec.args='test-suite/results/sessions/${TEST_SESSION_ID}/stress/stress_test_data' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" > "${stress_log}" 2>&1
     
     local exit_code=$?
     if [ ${exit_code} -eq 0 ]; then
@@ -267,6 +394,13 @@ run_all_tests() {
     
     local start_time=$(date +%s)
     local failed_tests=()
+    
+    if ! run_unit_tests; then
+        failed_tests+=("unit")
+    fi
+    if ! run_tools_tests; then
+        failed_tests+=("tools")
+    fi
     
     # 运行功能测试
     if ! run_functional_tests; then
@@ -320,6 +454,12 @@ run_test_by_type() {
     local test_type="$1"
     
     case "$test_type" in
+        "unit")
+            run_unit_tests
+            ;;
+        "tools")
+            run_tools_tests
+            ;;
         "functional"|"func")
             run_functional_tests
             ;;

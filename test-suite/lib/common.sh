@@ -56,6 +56,27 @@ BUILD_DIR="${PROJECT_ROOT}/build"
 TARGET_DIR="${PROJECT_ROOT}/target"
 RESULTS_DIR="${TEST_SUITE_DIR}/results"
 
+JACOCO_CSV="${TARGET_DIR}/site/jacoco/jacoco.csv"
+CORE_CLASSES=(
+  "LSMTree"
+  "MemTable"
+  "SSTable"
+  "WriteAheadLog"
+  "LeveledCompactionStrategy"
+  "SizeTieredCompactionStrategy"
+  "PartitionedLSMTree"
+  "RangePartitionStrategy"
+  "BloomFilter"
+)
+
+# 测试数据目录配置
+TEST_DATA_DIR="${TEST_SUITE_DIR}/data"
+TEST_DATA_FUNCTIONAL_DIR="${TEST_DATA_DIR}/functional"
+TEST_DATA_PERFORMANCE_DIR="${TEST_DATA_DIR}/performance"
+TEST_DATA_MEMORY_DIR="${TEST_DATA_DIR}/memory"
+TEST_DATA_STRESS_DIR="${TEST_DATA_DIR}/stress"
+TEST_DATA_CONCURRENT_DIR="${TEST_DATA_DIR}/concurrent"
+
 # Java 配置
 JAVA_OPTS="-Xmx2g -Xms1g -XX:+UseG1GC"
 MAIN_CLASS="com.brianxiadong.lsmtree"
@@ -68,6 +89,14 @@ BENCHMARK_OPERATIONS=${BENCHMARK_OPERATIONS:-10000}
 BENCHMARK_THREADS=${BENCHMARK_THREADS:-2}
 BENCHMARK_KEY_SIZE=${BENCHMARK_KEY_SIZE:-16}
 BENCHMARK_VALUE_SIZE=${BENCHMARK_VALUE_SIZE:-100}
+
+# 测试执行超时(秒)
+FUNCTIONAL_EXAMPLE_TIMEOUT=${FUNCTIONAL_EXAMPLE_TIMEOUT:-20}
+FUNCTIONAL_METRICS_TIMEOUT=${FUNCTIONAL_METRICS_TIMEOUT:-15}
+FUNCTIONAL_API_TIMEOUT=${FUNCTIONAL_API_TIMEOUT:-20}
+PERFORMANCE_TIMEOUT=${PERFORMANCE_TIMEOUT:-120}
+MEMORY_TIMEOUT=${MEMORY_TIMEOUT:-30}
+STRESS_TIMEOUT=${STRESS_TIMEOUT:-60}
 
 # 动态项目信息变量（将在 get_project_info 函数中设置）
 ARTIFACT_ID=""
@@ -135,6 +164,9 @@ check_environment() {
         if [ -f "${BUILD_DIR}/build.sh" ]; then
             log_info "正在构建项目..."
             "${BUILD_DIR}/build.sh" build
+        elif [ -f "${PROJECT_ROOT}/build.sh" ]; then
+            log_info "正在构建项目..."
+            "${PROJECT_ROOT}/build.sh"
         else
             log_error "构建脚本不存在，请先运行构建"
             return 1
@@ -158,6 +190,78 @@ check_environment() {
     log_info "可用磁盘空间: ${DISK_SPACE}KB"
     
     log_success "环境检查完成"
+}
+
+generate_jacoco_report() {
+    docker run --rm \
+        -v "${PROJECT_ROOT}":/workspace \
+        -v "${HOME}/.m2":/root/.m2 \
+        -w /workspace \
+        maven:3.8.6-openjdk-8 \
+        mvn -q -clean test jacoco:report >/dev/null 2>&1
+}
+
+calc_overall_line_coverage() {
+    if [ ! -f "${JACOCO_CSV}" ]; then
+        echo "0"
+        return
+    fi
+    awk -F, 'NR>1 {m+=$8; c+=$9} END {t=m+c; if(t==0){print 0}else{printf "%.4f", c/t}}' "${JACOCO_CSV}"
+}
+
+calc_classes_line_coverage() {
+    if [ ! -f "${JACOCO_CSV}" ]; then
+        echo "0"
+        return
+    fi
+    local cls="$1"
+    awk -F, -v cls="$cls" 'NR>1 {if($3==cls || index($3, cls ".")==1){m+=$8; c+=$9}} END {t=m+c; if(t==0){print 0}else{printf "%.4f", c/t}}' "${JACOCO_CSV}"
+}
+
+write_coverage_summary_json() {
+    local out="${SESSION_DIR}/coverage_summary.json"
+    local overall=$(calc_overall_line_coverage)
+    local details="{"
+    local first=true
+    for cls in "${CORE_CLASSES[@]}"; do
+        local ratio=$(calc_classes_line_coverage "$cls")
+        if [ "${first}" = true ]; then
+            first=false
+        else
+            details+=" ,"
+        fi
+        details+="\"${cls}\": ${ratio}"
+    done
+    details+="}"
+    cat > "${out}" <<EOF
+{
+  "overall_line": ${overall},
+  "core_line": ${details}
+}
+EOF
+}
+
+enforce_coverage_gates() {
+    local overall_min=${OVERALL_COVERAGE_MIN:-0.40}
+    local core_min=${CORE_COVERAGE_MIN:-0.60}
+    local overall=$(calc_overall_line_coverage)
+    local failed=0
+    if awk "BEGIN{exit !(${overall} >= ${overall_min})}"; then :; else failed=1; fi
+    local core_failed_classes=()
+    for cls in "${CORE_CLASSES[@]}"; do
+        local ratio=$(calc_classes_line_coverage "$cls")
+        if awk "BEGIN{exit !(${ratio} >= ${core_min})}"; then :; else core_failed_classes+=("$cls:${ratio}"); fi
+    done
+    write_coverage_summary_json
+    if [ ${failed} -eq 0 ] && [ ${#core_failed_classes[@]} -eq 0 ]; then
+        return 0
+    fi
+    if [ "${COVERAGE_FORCE}" = "true" ]; then
+        log_warning "覆盖率未达标但已强制继续: overall=${overall}, core_failed=${core_failed_classes[*]}"
+        return 0
+    fi
+    log_error "覆盖率未达标: overall=${overall} 要求>=${overall_min}; 核心模块低于${core_min}: ${core_failed_classes[*]}"
+    return 1
 }
 
 # =============================================================================
@@ -223,6 +327,18 @@ init_test_results() {
     "status": "running"
   },
   "categories": {
+    "unit": {
+      "status": "pending",
+      "start_time": null,
+      "end_time": null,
+      "tests": {}
+    },
+    "tools": {
+      "status": "pending",
+      "start_time": null,
+      "end_time": null,
+      "tests": {}
+    },
     "functional": {
       "status": "pending",
       "start_time": null,

@@ -293,6 +293,18 @@ generate_html_report() {
             <div class="subtitle">会话 ID: SESSION_ID_PLACEHOLDER</div>
             <div class="timestamp">生成时间: TIMESTAMP_PLACEHOLDER</div>
         </div>
+        <div class="test-section">
+            <h2>🛠️ 环境配置</h2>
+            <div class="test-content">
+                ENV_SECTION_PLACEHOLDER
+            </div>
+        </div>
+        <div class="test-section">
+            <h2>🔎 性能瓶颈分析与建议</h2>
+            <div class="test-content">
+                BOTTLENECKS_PLACEHOLDER
+            </div>
+        </div>
         
         <div class="summary">
             <div class="summary-card">
@@ -316,7 +328,27 @@ generate_html_report() {
                 <div class="status">总耗时</div>
             </div>
         </div>
+        <div class="test-section">
+            <h2>📈 覆盖率</h2>
+            <div class="test-content">
+                COVERAGE_SECTION_PLACEHOLDER
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h2>🧩 单元测试</h2>
+            <div class="test-content">
+                UNIT_TESTS_PLACEHOLDER
+            </div>
+        </div>
         
+        <div class="test-section">
+            <h2>🔧 工具与 CLI</h2>
+            <div class="test-content">
+                TOOLS_TESTS_PLACEHOLDER
+            </div>
+        </div>
+
         <div class="test-section">
             <h2>🧪 功能测试</h2>
             <div class="test-content">
@@ -406,7 +438,7 @@ replace_html_placeholders() {
     
     # 统计各类测试结果 - 使用统一的JSON结果文件
     local results_file="${SESSION_DIR}/test_results.json"
-    for test_type in functional performance memory stress; do
+    for test_type in unit tools functional performance memory stress; do
         local category_status=$(get_category_status_from_json "$results_file" "$test_type")
         if [ "$category_status" != "not_run" ]; then
             total_tests=$((total_tests + 1))
@@ -456,10 +488,15 @@ replace_html_placeholders() {
     sed -i '' "s/DURATION_PLACEHOLDER/${duration}/g" "${html_file}"
     
     # 生成各类测试的详细内容
+    generate_test_section_html "unit" "单元测试" "${html_file}"
+    generate_test_section_html "tools" "工具与 CLI" "${html_file}"
     generate_test_section_html "functional" "功能测试" "${html_file}"
     generate_test_section_html "performance" "性能测试" "${html_file}"
     generate_test_section_html "memory" "内存测试" "${html_file}"
     generate_test_section_html "stress" "压力测试" "${html_file}"
+    generate_coverage_section_html "${html_file}"
+    generate_env_section_html "${html_file}"
+    generate_bottlenecks_section_html "${html_file}"
 }
 
 # 生成测试部分的 HTML 内容 - 使用统一JSON格式
@@ -575,6 +612,54 @@ generate_test_section_html() {
     rm -f "${temp_content}"
 }
 
+generate_coverage_section_html() {
+    local html_file="$1"
+    local coverage_file="${SESSION_DIR}/coverage_summary.json"
+    local content="<div>未找到覆盖率数据</div>"
+    if [ -f "${coverage_file}" ]; then
+        local overall=$(jq -r '.overall_line' "${coverage_file}" 2>/dev/null)
+        local rows=""
+        while IFS= read -r kv; do
+            local k=$(echo "$kv" | cut -d: -f1)
+            local v=$(echo "$kv" | cut -d: -f2)
+            local pct=$(awk -v x="$v" 'BEGIN{printf "%0.1f", x*100}')
+            rows="${rows}<tr><td>${k}</td><td>${pct}%</td></tr>"
+        done < <(jq -r '.core_line | to_entries[] | "\(.key):\(.value)"' "${coverage_file}" 2>/dev/null)
+        local overall_pct=$(awk -v x="$overall" 'BEGIN{printf "%0.1f", x*100}')
+        content="<div>总体行覆盖率：${overall_pct}%</div><table style=\"width:100%;margin-top:10px;border-collapse:collapse;\"><thead><tr><th style=\"text-align:left;border-bottom:1px solid #eee;\">模块</th><th style=\"text-align:left;border-bottom:1px solid #eee;\">行覆盖率</th></tr></thead><tbody>${rows}</tbody></table>"
+    fi
+    local tmp=$(mktemp)
+    sed "s/COVERAGE_SECTION_PLACEHOLDER/$(printf '%s' "${content}" | sed 's/[\&/]/\\&/g')/" "${html_file}" > "${tmp}"
+    mv "${tmp}" "${html_file}"
+}
+
+generate_env_section_html() {
+    local html_file="$1"
+    local json_file="${SESSION_DIR}/reports/test_report_${TEST_SESSION_ID}.json"
+    local content=""
+    if [ -f "${json_file}" ]; then
+        local java=$(jq -r '.system_info.java_version' "$json_file" 2>/dev/null)
+        local os=$(jq -r '.system_info.os_type' "$json_file" 2>/dev/null)
+        local osv=$(jq -r '.system_info.os_version' "$json_file" 2>/dev/null)
+        local cpu=$(jq -r '.system_info.cpu_cores' "$json_file" 2>/dev/null)
+        local mem=$(jq -r '.system_info.memory_gb' "$json_file" 2>/dev/null)
+        content="<ul><li>Java: ${java}</li><li>OS: ${os} ${osv}</li><li>CPU Cores: ${cpu}</li><li>Memory: ${mem} GB</li></ul>"
+    else
+        content="<div>未找到系统信息</div>"
+    fi
+    local tmp=$(mktemp)
+    sed "s/ENV_SECTION_PLACEHOLDER/$(printf '%s' "${content}" | sed 's/[\&/]/\\&/g')/" "${html_file}" > "${tmp}"
+    mv "${tmp}" "${html_file}"
+}
+
+generate_bottlenecks_section_html() {
+    local html_file="$1"
+    local content="<ul><li>写入放大与刷盘：优化 MemTable 阈值与合并策略</li><li>读放大：启用布隆过滤器与合理的分区策略</li><li>GC 影响：观察 GC 日志，调整堆大小与收集器</li><li>并发竞争：根据 CPU 调整线程数，避免过度上下文切换</li></ul>"
+    local tmp=$(mktemp)
+    sed "s/BOTTLENECKS_PLACEHOLDER/$(printf '%s' "${content}" | sed 's/[\&/]/\\&/g')/" "${html_file}" > "${tmp}"
+    mv "${tmp}" "${html_file}"
+}
+
 # =============================================================================
 # JSON 报告生成
 # =============================================================================
@@ -659,7 +744,7 @@ collect_test_results() {
     local results="{"
     local first=true
     
-    for test_type in functional performance memory stress; do
+    for test_type in unit tools functional performance memory stress; do
         if [ "${first}" = false ]; then
             results="${results},"
         fi
@@ -747,7 +832,7 @@ generate_test_summary_json() {
     local skipped_tests=0
     
     if [ -f "${test_results_file}" ]; then
-        for test_type in functional performance memory stress; do
+    for test_type in unit tools functional performance memory stress; do
             local status=$(get_category_status_from_json "${test_results_file}" "${test_type}")
             local overall_status=$(get_category_overall_status "${test_results_file}" "${test_type}")
             

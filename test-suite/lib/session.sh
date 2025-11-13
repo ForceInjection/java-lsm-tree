@@ -17,6 +17,8 @@ SESSION_FUNCTIONAL_DIR=""
 SESSION_PERFORMANCE_DIR=""
 SESSION_MEMORY_DIR=""
 SESSION_STRESS_DIR=""
+SESSION_UNIT_DIR=""
+SESSION_TOOLS_DIR=""
 SESSION_REPORTS_DIR=""
 
 # =============================================================================
@@ -36,6 +38,8 @@ create_session() {
     SESSION_PERFORMANCE_DIR="${SESSION_DIR}/performance"
     SESSION_MEMORY_DIR="${SESSION_DIR}/memory"
     SESSION_STRESS_DIR="${SESSION_DIR}/stress"
+    SESSION_UNIT_DIR="${SESSION_DIR}/unit"
+    SESSION_TOOLS_DIR="${SESSION_DIR}/tools"
     SESSION_REPORTS_DIR="${SESSION_DIR}/reports"
     
     # 检查会话是否已存在
@@ -49,6 +53,8 @@ create_session() {
     mkdir -p "${SESSION_PERFORMANCE_DIR}"
     mkdir -p "${SESSION_MEMORY_DIR}"
     mkdir -p "${SESSION_STRESS_DIR}"
+    mkdir -p "${SESSION_UNIT_DIR}"
+    mkdir -p "${SESSION_TOOLS_DIR}"
     mkdir -p "${SESSION_REPORTS_DIR}"
     
     # 创建归档目录
@@ -72,6 +78,8 @@ create_session() {
     },
     "status": "running",
     "tests": {
+        "unit": "pending",
+        "tools": "pending",
         "functional": "pending",
         "performance": "pending",
         "memory": "pending",
@@ -309,10 +317,10 @@ show_session() {
         echo "=== 测试状态 ==="
         if command_exists jq; then
             jq -r '.tests | to_entries[] | "\(.key): \(.value)"' "$summary_file" 2>/dev/null || {
-                grep '"tests"' -A 10 "$summary_file" | grep -E '(functional|performance|memory|stress)' | sed 's/.*"\([^"]*\)": "\([^"]*\)".*/\1: \2/'
+                grep '"tests"' -A 10 "$summary_file" | grep -E '(unit|tools|functional|performance|memory|stress)' | sed 's/.*"\([^"]*\)": "\([^"]*\)".*/\1: \2/'
             }
         else
-            grep '"tests"' -A 10 "$summary_file" | grep -E '(functional|performance|memory|stress)' | sed 's/.*"\([^"]*\)": "\([^"]*\)".*/\1: \2/'
+            grep '"tests"' -A 10 "$summary_file" | grep -E '(unit|tools|functional|performance|memory|stress)' | sed 's/.*"\([^"]*\)": "\([^"]*\)".*/\1: \2/'
         fi
         echo ""
     fi
@@ -372,6 +380,7 @@ set_session_variables_from_id() {
     SESSION_PERFORMANCE_DIR="${SESSION_DIR}/performance"
     SESSION_MEMORY_DIR="${SESSION_DIR}/memory"
     SESSION_STRESS_DIR="${SESSION_DIR}/stress"
+    SESSION_UNIT_DIR="${SESSION_DIR}/unit"
     SESSION_REPORTS_DIR="${SESSION_DIR}/reports"
     
     return 0
@@ -494,7 +503,9 @@ ask_user_session_choice() {
         local performance_status=$(grep '"performance"' "$summary_file" | cut -d'"' -f4 2>/dev/null || echo "pending")
         local memory_status=$(grep '"memory"' "$summary_file" | cut -d'"' -f4 2>/dev/null || echo "pending")
         local stress_status=$(grep '"stress"' "$summary_file" | cut -d'"' -f4 2>/dev/null || echo "pending")
+        local unit_status=$(grep '"unit"' "$summary_file" | cut -d'"' -f4 2>/dev/null || echo "pending")
         
+        echo -e "    - 单元测试: ${unit_status}"
         echo -e "    - 功能测试: ${functional_status}"
         echo -e "    - 性能测试: ${performance_status}"
         echo -e "    - 内存测试: ${memory_status}"
@@ -507,9 +518,17 @@ ask_user_session_choice() {
     echo "  2) 创建新会话 (开始一个全新的测试会话)"
     echo ""
     
+    echo "提示: 3秒内未选择将自动使用默认选项(2)"
+    
     while true; do
-        read -p "请输入选择 (1 或 2): " -n 1 -r choice
+        read -p "请输入选择 (1 或 2) [默认:2]: " -t 3 -n 1 -r choice
         echo ""
+        
+        # 如果超时或输入为空，使用默认值2
+        if [ $? -ne 0 ] || [ -z "$choice" ]; then
+            choice="2"
+            echo "超时或未输入，使用默认选项: 2"
+        fi
         
         case "$choice" in
             1)

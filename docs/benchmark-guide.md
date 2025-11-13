@@ -250,10 +250,14 @@ Bloom Filter 命中率: 95.2%
 #### 6.3.1 使用测试套件运行
 
 ```bash
-# 运行完整的性能测试套件
+# 运行完整的性能测试套件（推荐方式）
 ./test-suite/test-suite.sh performance
 
-# 查看测试结果
+# 查看测试结果和会话信息
+./test-suite/test-suite.sh list
+./test-suite/test-suite.sh show <会话ID>
+
+# 查看性能测试详细报告
 ls -la test-suite/results/sessions/*/performance/
 ```
 
@@ -263,27 +267,100 @@ ls -la test-suite/results/sessions/*/performance/
 # 启用详细日志输出
 java -Djava.util.logging.level=FINE \
   -cp target/java-lsm-tree-1.0.0.jar com.brianxiadong.lsmtree.BenchmarkRunner
+
+# 在测试套件中启用调试模式
+export DEBUG=1
+./test-suite/test-suite.sh performance
 ```
 
 ### 6.4 结果分析建议
 
 #### 6.4.1 测试稳定性
 
-- **多次运行**: 进行多轮测试以获得稳定的性能数据
-- **环境一致性**: 确保测试环境的一致性和可重复性
+- **多次运行**: 使用测试套件的多轮测试功能获得稳定的性能数据
+- **环境一致性**: 测试套件基于 Docker 确保环境的一致性和可重复性
 - **基准对比**: 建立性能基准线，便于版本间对比
+- **会话管理**: 使用 `./test-suite/test-suite.sh list` 查看历史测试会话
 
 #### 6.4.2 指标关注重点
 
 - **延迟分布**: 重点关注 P95、P99 延迟而非仅平均值
 - **吞吐量趋势**: 观察不同负载下的吞吐量变化
 - **资源使用**: 监控 CPU、内存、磁盘 I/O 使用情况
+- **LSM 状态**: 关注 MemTable、SSTable、Bloom Filter 等组件状态
 
 ---
 
-## 7. 相关文档
+## 7. 测试套件高级用法
+
+### 7.1 性能测试参数配置
+
+```bash
+# 自定义性能测试参数
+export PERFORMANCE_OPS=200000           # 操作数量
+export PERFORMANCE_THREADS=8           # 并发线程数
+export PERFORMANCE_ITERATIONS=5        # 测试轮次
+export PERFORMANCE_KEY_SIZE=32         # 键大小
+export PERFORMANCE_VALUE_SIZE=256      # 值大小
+
+# 运行性能测试
+./test-suite/test-suite.sh performance
+```
+
+### 7.2 超时配置
+
+```bash
+# 调整性能测试超时时间（秒）
+export PERFORMANCE_TIMEOUT=180
+
+# 调整其他测试超时时间
+export FUNCTIONAL_EXAMPLE_TIMEOUT=30
+export FUNCTIONAL_METRICS_TIMEOUT=20
+export FUNCTIONAL_API_TIMEOUT=25
+export MEMORY_TIMEOUT=45
+export STRESS_TIMEOUT=90
+```
+
+### 7.3 环境配置
+
+```bash
+# JVM 内存配置
+export JAVA_OPTS="-Xmx4g -Xms2g"
+
+# Maven 配置
+export MAVEN_OPTS="-Xmx2g"
+
+# Docker 配置
+export MAVEN_VERSION="3.9.6-eclipse-temurin-17"
+```
+
+### 7.4 测试结果管理
+
+```bash
+# 查看所有测试会话
+./test-suite/test-suite.sh list
+
+# 查看特定会话详情
+./test-suite/test-suite.sh show 20241201_143022
+
+# 重新生成会话报告
+./test-suite/test-suite.sh report 20241201_143022
+
+# 删除会话
+./test-suite/test-suite.sh delete 20241201_143022
+
+# 清理测试环境
+./test-suite/test-suite.sh clean
+./test-suite/test-suite.sh clean-all
+```
+
+---
+
+## 8. 相关文档
 
 - [LSM Tree 深度解析](./lsm-tree-deep-dive.md)
 - [性能分析指南](./performance-analysis-guide.md)
 - [源码分析文档](./soucrce-code-analysis.md)
-- [测试套件使用说明](../test-suite/README.md)
+- [测试套件使用指南](./test-suite-guide.md)
+- [WAL 分析工具指南](./wal-analyzer-guide.md)
+- [SSTable 分析工具指南](./db-analyzer-guide.md)

@@ -1,0 +1,11 @@
+{
+  "title": "Java LSM Tree Overview",
+  "panels": [
+    {"type": "graph", "title": "Read Latency", "targets": [{"expr": "rate(lsm_read_latency_seconds_count[1m])"}]},
+    {"type": "graph", "title": "Write Latency", "targets": [{"expr": "rate(lsm_write_latency_seconds_count[1m])"}]},
+    {"type": "graph", "title": "Flush Bytes", "targets": [{"expr": "rate(lsm_flush_bytes_sum[1m])"}]},
+    {"type": "graph", "title": "Compaction Bytes", "targets": [{"expr": "rate(lsm_compaction_bytes_sum[1m])"}]},
+    {"type": "graph", "title": "SSTable Count", "targets": [{"expr": "lsm_sstable_count"}]},
+    {"type": "graph", "title": "WAL Size", "targets": [{"expr": "lsm_wal_size_bytes"}]}
+  ]
+}

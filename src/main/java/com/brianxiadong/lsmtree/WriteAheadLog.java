@@ -84,6 +84,11 @@ public class WriteAheadLog {
         }
     }
 
+    public long sizeBytes() {
+        File file = new File(filePath);
+        return file.exists() ? file.length() : 0L;
+    }
+
     /**
      * WAL日志条目
      */

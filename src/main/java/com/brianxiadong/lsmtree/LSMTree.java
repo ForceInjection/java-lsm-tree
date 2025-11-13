@@ -26,6 +26,8 @@ public class LSMTree implements AutoCloseable {
     // 后台任务
     private final ExecutorService compactionExecutor;
     private final CompactionStrategy compactionStrategy;
+    private final CompressionStrategy compressionStrategy;
+    private final LSMTreeMetrics metrics;
 
     // WAL (Write-Ahead Log) 相关
     private final WriteAheadLog wal;
@@ -43,11 +45,27 @@ public class LSMTree implements AutoCloseable {
         this.immutableMemTables = new ArrayList<>();
         this.ssTables = new ArrayList<>();
 
-        // 初始化压缩策略
-        this.compactionStrategy = new CompactionStrategy(dataDir, 4, 10);
+        this.compactionStrategy = new LeveledCompactionStrategy(dataDir, 4, 10);
+        this.compressionStrategy = new NoneCompressionStrategy();
+        this.compactionStrategy.setCompressionStrategy(this.compressionStrategy);
+        this.metrics = new MicrometerLSMTreeMetrics("default");
 
         // 初始化WAL
         this.wal = new WriteAheadLog(dataDir + "/wal.log");
+
+        io.micrometer.core.instrument.MeterRegistry registry = MetricsRegistry.get();
+        io.micrometer.core.instrument.Gauge.builder("lsm.memtable.size", this, t -> t.activeMemTable.size())
+                .register(registry);
+        io.micrometer.core.instrument.Gauge.builder("lsm.sstable.count", this, t -> t.ssTables.size())
+                .register(registry);
+        io.micrometer.core.instrument.Gauge.builder("lsm.level.count", this, t -> t.countLevel(0)).tag("level", "0")
+                .register(registry);
+        io.micrometer.core.instrument.Gauge.builder("lsm.level.count", this, t -> t.countLevel(1)).tag("level", "1")
+                .register(registry);
+        io.micrometer.core.instrument.Gauge.builder("lsm.level.count", this, t -> t.countLevel(2)).tag("level", "2")
+                .register(registry);
+        io.micrometer.core.instrument.Gauge.builder("lsm.wal.size.bytes", this, t -> (double) t.wal.sizeBytes())
+                .register(registry);
 
         // 启动后台压缩线程
         this.compactionExecutor = Executors.newSingleThreadExecutor(r -> {
@@ -61,12 +79,15 @@ public class LSMTree implements AutoCloseable {
 
         // 暂时禁用后台压缩任务，避免测试时的线程问题
         // startBackgroundCompaction();
+
+        MetricsHttpServer.startIfEnabled();
     }
 
     /**
      * 插入键值对
      */
     public void put(String key, String value) throws IOException {
+        long start = System.nanoTime();
         if (key == null || value == null) {
             throw new IllegalArgumentException("Key and value cannot be null");
         }
@@ -85,6 +106,8 @@ public class LSMTree implements AutoCloseable {
             }
         } finally {
             lock.writeLock().unlock();
+            long end = System.nanoTime();
+            metrics.recordWrite(end - start);
         }
     }
 
@@ -117,23 +140,27 @@ public class LSMTree implements AutoCloseable {
      * 查询键值
      */
     public String get(String key) {
+        long start = System.nanoTime();
         if (key == null) {
             throw new IllegalArgumentException("Key cannot be null");
         }
 
         lock.readLock().lock();
         try {
-            // 1. 首先查询活跃MemTable
-            String value = activeMemTable.get(key);
-            if (value != null) {
-                return value;
+            KeyValue ent = activeMemTable.getEntry(key);
+            if (ent != null) {
+                if (ent.isDeleted())
+                    return null;
+                return ent.getValue();
             }
 
             // 2. 查询不可变MemTable（按时间倒序）
             for (int i = immutableMemTables.size() - 1; i >= 0; i--) {
-                value = immutableMemTables.get(i).get(key);
-                if (value != null) {
-                    return value;
+                KeyValue e = immutableMemTables.get(i).getEntry(key);
+                if (e != null) {
+                    if (e.isDeleted())
+                        return null;
+                    return e.getValue();
                 }
             }
 
@@ -142,16 +169,107 @@ public class LSMTree implements AutoCloseable {
             sortedSSTables.sort((a, b) -> Long.compare(b.getCreationTime(), a.getCreationTime()));
 
             for (SSTable ssTable : sortedSSTables) {
-                value = ssTable.get(key);
-                if (value != null) {
-                    return value;
+                KeyValue e = ssTable.getEntryRaw(key);
+                if (e != null) {
+                    if (e.isDeleted())
+                        return null;
+                    return e.getValue();
                 }
             }
 
             return null;
         } finally {
             lock.readLock().unlock();
+            long end = System.nanoTime();
+            metrics.recordRead(end - start);
         }
+    }
+
+    public java.util.Iterator<KeyValue> range(String startKey, String endKey, boolean includeStart, boolean includeEnd)
+            throws java.io.IOException {
+        if (startKey != null && endKey != null && startKey.compareTo(endKey) > 0) {
+            throw new IllegalArgumentException("startKey > endKey");
+        }
+        lock.readLock().lock();
+        try {
+            java.util.List<java.util.List<KeyValue>> sources = new java.util.ArrayList<>();
+            sources.add(activeMemTable.getRangeEntriesRaw(startKey, endKey, includeStart, includeEnd));
+            for (int i = immutableMemTables.size() - 1; i >= 0; i--) {
+                sources.add(immutableMemTables.get(i).getRangeEntriesRaw(startKey, endKey, includeStart, includeEnd));
+            }
+            java.util.List<SSTable> tables = new java.util.ArrayList<>(ssTables);
+            tables.sort((x, y) -> Long.compare(y.getCreationTime(), x.getCreationTime()));
+            for (SSTable t : tables) {
+                sources.add(t.getRangeEntries(startKey, endKey, includeStart, includeEnd));
+            }
+
+            java.util.List<KeyValue> out = new java.util.ArrayList<>();
+            java.util.List<Integer> idx = new java.util.ArrayList<>();
+            for (int i = 0; i < sources.size(); i++)
+                idx.add(0);
+            java.util.Comparator<int[]> cmp = (a, b) -> {
+                KeyValue ka = sources.get(a[0]).get(a[1]);
+                KeyValue kb = sources.get(b[0]).get(b[1]);
+                int kc = ka.getKey().compareTo(kb.getKey());
+                if (kc != 0)
+                    return kc;
+                return Long.compare(kb.getTimestamp(), ka.getTimestamp());
+            };
+            java.util.PriorityQueue<int[]> pq = new java.util.PriorityQueue<>(cmp);
+            for (int s = 0; s < sources.size(); s++) {
+                if (!sources.get(s).isEmpty())
+                    pq.add(new int[] { s, 0 });
+            }
+            while (!pq.isEmpty()) {
+                int[] top = pq.poll();
+                KeyValue best = sources.get(top[0]).get(top[1]);
+                String k = best.getKey();
+                if (top[1] + 1 < sources.get(top[0]).size())
+                    pq.add(new int[] { top[0], top[1] + 1 });
+                while (!pq.isEmpty()) {
+                    int[] n = pq.peek();
+                    KeyValue kvn = sources.get(n[0]).get(n[1]);
+                    if (!kvn.getKey().equals(k))
+                        break;
+                    pq.poll();
+                    if (kvn.getTimestamp() > best.getTimestamp())
+                        best = kvn;
+                    if (n[1] + 1 < sources.get(n[0]).size())
+                        pq.add(new int[] { n[0], n[1] + 1 });
+                }
+                if (!best.isDeleted())
+                    out.add(best);
+            }
+            out.sort((x, y) -> x.getKey().compareTo(y.getKey()));
+            return out.iterator();
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+
+    public java.util.Iterator<KeyValue> rangeReverse(String startKey, String endKey) throws java.io.IOException {
+        java.util.Iterator<KeyValue> it = range(startKey, endKey, true, true);
+        java.util.List<KeyValue> list = new java.util.ArrayList<>();
+        while (it.hasNext())
+            list.add(it.next());
+        list.sort((x, y) -> y.getKey().compareTo(x.getKey()));
+        return list.iterator();
+    }
+
+    // 范围检查辅助方法 - 保留以备将来使用
+    @SuppressWarnings("unused")
+    private boolean inRange(String key, String startKey, String endKey, boolean includeStart, boolean includeEnd) {
+        if (startKey != null) {
+            int c = key.compareTo(startKey);
+            if (c < 0 || (c == 0 && !includeStart))
+                return false;
+        }
+        if (endKey != null) {
+            int c = key.compareTo(endKey);
+            if (c > 0 || (c == 0 && !includeEnd))
+                return false;
+        }
+        return true;
     }
 
     /**
@@ -182,23 +300,32 @@ public class LSMTree implements AutoCloseable {
         List<KeyValue> entries = memTable.getAllEntries();
 
         if (!entries.isEmpty()) {
+            long flushStart = System.nanoTime();
             // 排序
             entries.sort(KeyValue::compareTo);
 
             // 创建SSTable文件
             String fileName = String.format("%s/sstable_level0_%d.db",
                     dataDir, System.currentTimeMillis());
-            SSTable newSSTable = new SSTable(fileName, entries);
-            ssTables.add(newSSTable);
-
-            // 清理WAL
-            wal.checkpoint();
+            try {
+                SSTable newSSTable = new SSTable(fileName, entries, compressionStrategy);
+                ssTables.add(newSSTable);
+                wal.checkpoint();
+            } catch (IOException e) {
+                metrics.recordFlushFailure();
+                throw e;
+            }
+            long flushEnd = System.nanoTime();
+            long bytes = new java.io.File(fileName).length();
+            metrics.recordFlush(flushEnd - flushStart, bytes);
         }
     }
 
     /**
      * 启动后台压缩任务
      */
+    // 后台压缩任务 - 暂时禁用以避免测试线程问题
+    @SuppressWarnings("unused")
     private void startBackgroundCompaction() {
         compactionExecutor.submit(() -> {
             while (!Thread.currentThread().isInterrupted()) {
@@ -222,14 +349,74 @@ public class LSMTree implements AutoCloseable {
      * 执行压缩操作
      */
     private void performCompaction() throws IOException {
+        long start = System.nanoTime();
         lock.writeLock().lock();
+        long bytesBeforeCompaction = 0L;
         try {
-            List<SSTable> newSSTables = compactionStrategy.compact(ssTables);
+            for (SSTable t : ssTables) {
+                java.io.File f = new java.io.File(t.getFilePath());
+                if (f.exists())
+                    bytesBeforeCompaction += f.length();
+            }
+            List<SSTable> newSSTables;
+            try {
+                newSSTables = compactionStrategy.compact(ssTables);
+            } catch (IOException e) {
+                metrics.recordCompactionFailure();
+                throw e;
+            }
             ssTables.clear();
             ssTables.addAll(newSSTables);
         } finally {
             lock.writeLock().unlock();
+            long end = System.nanoTime();
+            long bytesOut = 0L;
+            for (SSTable t : ssTables) {
+                java.io.File f = new java.io.File(t.getFilePath());
+                if (f.exists())
+                    bytesOut += f.length();
+            }
+            long bytesCompacted = bytesOut;
+            metrics.recordCompaction(end - start, bytesCompacted);
+
+            // 调试信息：记录压缩效率
+            if (bytesBeforeCompaction > 0) {
+                double compressionRatio = (double) bytesOut / bytesBeforeCompaction;
+                double spaceSaved = 1.0 - compressionRatio;
+                System.out.printf(
+                        "[DEBUG] Compaction completed: before=%,d bytes, after=%,d bytes, ratio=%.2f, saved=%.1f%%\n",
+                        bytesBeforeCompaction, bytesOut, compressionRatio, spaceSaved * 100);
+            }
         }
+    }
+
+    private int countLevel(int level) {
+        int c = 0;
+        for (SSTable t : ssTables) {
+            String path = t.getFilePath();
+            int idx = path.indexOf("level");
+            if (idx >= 0) {
+                int s = idx + 5;
+                int e = path.indexOf('_', s);
+                if (e > s) {
+                    try {
+                        int lv = Integer.parseInt(path.substring(s, e));
+                        if (lv == level)
+                            c++;
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+        }
+        return c;
+    }
+
+    public int getSSTableCount() {
+        return ssTables.size();
+    }
+
+    public int getActiveMemTableSize() {
+        return activeMemTable.size();
     }
 
     /**
@@ -292,6 +479,8 @@ public class LSMTree implements AutoCloseable {
 
         // 立即关闭线程池，不等待
         compactionExecutor.shutdownNow();
+
+        MetricsHttpServer.stopIfRunning();
     }
 
     /**
