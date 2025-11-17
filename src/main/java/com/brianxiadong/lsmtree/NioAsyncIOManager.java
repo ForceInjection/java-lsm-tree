@@ -1,0 +1,165 @@
+package com.brianxiadong.lsmtree;
+
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.AsynchronousFileChannel;
+import java.nio.channels.FileChannel;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.util.EnumSet;
+import java.util.Objects;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicLong;
+
+public class NioAsyncIOManager implements AsyncIOManager {
+    private final ExecutorService ioExecutor;
+    private final ConcurrentHashMap<String, AsynchronousFileChannel> channelCache = new ConcurrentHashMap<>();
+
+    private final Timer readTimer;
+    private final Timer writeTimer;
+    private final Counter readBytes;
+    private final Counter writeBytes;
+    private final AtomicLong inflight = new AtomicLong(0);
+
+    public NioAsyncIOManager(int threads, String metricsName) throws IOException {
+        this.ioExecutor = new ThreadPoolExecutor(
+                threads,
+                threads,
+                60L,
+                TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(threads * 1024),
+                r -> {
+                    Thread t = new Thread(r, "LSM-IO-" + System.nanoTime());
+                    t.setDaemon(true);
+                    return t;
+                },
+                new ThreadPoolExecutor.CallerRunsPolicy());
+        
+
+        MeterRegistry registry = MetricsRegistry.get();
+        this.readTimer = Timer.builder("lsm.io.async.read.latency").tag("name", metricsName).register(registry);
+        this.writeTimer = Timer.builder("lsm.io.async.write.latency").tag("name", metricsName).register(registry);
+        this.readBytes = Counter.builder("lsm.io.async.read.bytes").tag("name", metricsName).register(registry);
+        this.writeBytes = Counter.builder("lsm.io.async.write.bytes").tag("name", metricsName).register(registry);
+        Gauge.builder("lsm.io.async.inflight", inflight, AtomicLong::get).tag("name", metricsName).register(registry);
+    }
+
+    private AsynchronousFileChannel openChannel(String filename) throws IOException {
+        AsynchronousFileChannel ch = channelCache.get(filename);
+        if (ch != null && ch.isOpen()) return ch;
+        Path path = Paths.get(filename);
+        AsynchronousFileChannel created = AsynchronousFileChannel.open(
+                path,
+                EnumSet.of(StandardOpenOption.READ, StandardOpenOption.WRITE, StandardOpenOption.CREATE),
+                ioExecutor);
+        AsynchronousFileChannel prev = channelCache.put(filename, created);
+        if (prev != null && prev.isOpen()) {
+            try { prev.close(); } catch (IOException ignored) {}
+        }
+        return created;
+    }
+
+    @Override
+    public CompletableFuture<byte[]> readAsync(String filename, long offset, int length) throws IOException {
+        Objects.requireNonNull(filename, "filename");
+        if (offset < 0 || length < 0) throw new IllegalArgumentException("offset/length must be >= 0");
+        AsynchronousFileChannel ch = openChannel(filename);
+        ByteBuffer buf = ByteBuffer.allocate(length);
+        long start = System.nanoTime();
+        inflight.incrementAndGet();
+        CompletableFuture<byte[]> cf = new CompletableFuture<>();
+        ch.read(buf, offset, null, new CompletionHandlerImpl<>(bytesRead -> {
+            inflight.decrementAndGet();
+            readTimer.record(System.nanoTime() - start, TimeUnit.NANOSECONDS);
+            if (bytesRead < 0) {
+                cf.completeExceptionally(new IOException("EOF"));
+                return;
+            }
+            readBytes.increment(bytesRead);
+            buf.flip();
+            byte[] out = new byte[buf.remaining()];
+            buf.get(out);
+            cf.complete(out);
+        }, ex -> {
+            inflight.decrementAndGet();
+            cf.completeExceptionally(ex);
+        }));
+        return cf;
+    }
+
+    @Override
+    public CompletableFuture<Void> writeAsync(String filename, long offset, byte[] data) throws IOException {
+        Objects.requireNonNull(filename, "filename");
+        Objects.requireNonNull(data, "data");
+        if (offset < 0) throw new IllegalArgumentException("offset must be >= 0");
+        AsynchronousFileChannel ch = openChannel(filename);
+        ByteBuffer buf = ByteBuffer.wrap(data);
+        long start = System.nanoTime();
+        inflight.incrementAndGet();
+        CompletableFuture<Void> cf = new CompletableFuture<>();
+        writeRecursive(ch, offset, buf, cf, start);
+        return cf;
+    }
+
+    private void writeRecursive(AsynchronousFileChannel ch, long pos, ByteBuffer buf, CompletableFuture<Void> cf, long start) {
+        ch.write(buf, pos, null, new CompletionHandlerImpl<>(written -> {
+            if (written > 0) writeBytes.increment(written);
+            if (buf.hasRemaining()) {
+                writeRecursive(ch, pos + written, buf, cf, start);
+                return;
+            }
+            inflight.decrementAndGet();
+            writeTimer.record(System.nanoTime() - start, TimeUnit.NANOSECONDS);
+            cf.complete(null);
+        }, ex -> {
+            inflight.decrementAndGet();
+            cf.completeExceptionally(ex);
+        }));
+    }
+
+    @Override
+    public CompletableFuture<Void> syncAsync(String filename) throws IOException {
+        Objects.requireNonNull(filename, "filename");
+        CompletableFuture<Void> cf = new CompletableFuture<>();
+        inflight.incrementAndGet();
+        long start = System.nanoTime();
+        ioExecutor.submit(() -> {
+            try (FileChannel fc = FileChannel.open(Paths.get(filename), StandardOpenOption.WRITE)) {
+                fc.force(true);
+                writeTimer.record(System.nanoTime() - start, TimeUnit.NANOSECONDS);
+                cf.complete(null);
+            } catch (IOException ex) {
+                cf.completeExceptionally(ex);
+            } finally {
+                inflight.decrementAndGet();
+            }
+        });
+        return cf;
+    }
+
+    @Override
+    public void close() throws IOException {
+        for (AsynchronousFileChannel ch : channelCache.values()) {
+            try { ch.close(); } catch (IOException ignored) {}
+        }
+        channelCache.clear();
+        ioExecutor.shutdown();
+    }
+
+    static final class CompletionHandlerImpl<V> implements java.nio.channels.CompletionHandler<V, Object> {
+        private final java.util.function.Consumer<V> onSuccess;
+        private final java.util.function.Consumer<Throwable> onError;
+        CompletionHandlerImpl(java.util.function.Consumer<V> onSuccess, java.util.function.Consumer<Throwable> onError) {
+            this.onSuccess = onSuccess;
+            this.onError = onError;
+        }
+        @Override public void completed(V result, Object attachment) { onSuccess.accept(result); }
+        @Override public void failed(Throwable exc, Object attachment) { onError.accept(exc); }
+    }
+}

@@ -14,6 +14,7 @@
 #   tools                  - 运行工具与 CLI 测试
 #   functional|func        - 运行功能测试
 #   performance|perf       - 运行性能测试
+#   cache-benchmark|cache  - 运行缓存对比基准测试
 #   memory|mem            - 运行内存测试
 #   stress                - 运行压力测试
 #   list                  - 列出所有测试会话
@@ -94,6 +95,7 @@ Java LSM Tree 测试套件
   tools                  运行工具与 CLI 测试
   functional, func       运行功能测试
   performance, perf      运行性能测试  
+  cache-benchmark, cache 运行缓存对比基准测试
   memory, mem           运行内存测试
   stress                运行压力测试
   list                  列出所有测试会话
@@ -109,6 +111,7 @@ Java LSM Tree 测试套件
   $0                     # 运行所有测试
   $0 functional          # 只运行功能测试
   $0 performance         # 只运行性能测试
+  $0 cache-benchmark     # 只运行缓存对比基准测试
   $0 list                # 列出所有会话
   $0 show 20241201_143022 # 显示指定会话信息
   $0 delete 20241201_143022 # 删除指定会话
@@ -461,7 +464,7 @@ main() {
                 exit 1
             fi
             ;;
-        "functional"|"func"|"tools"|"performance"|"perf"|"memory"|"mem"|"stress")
+        "functional"|"func"|"tools"|"performance"|"perf"|"cache-benchmark"|"cache"|"memory"|"mem"|"stress")
             if ! init_test_suite_no_gate; then
                 log_error "测试套件初始化失败"
                 exit 1
@@ -491,6 +494,9 @@ main() {
             ;;
         "performance"|"perf")
             run_single_test "performance"
+            ;;
+        "cache-benchmark"|"cache")
+            run_single_test "cache-benchmark"
             ;;
         "memory"|"mem")
             run_single_test "memory"

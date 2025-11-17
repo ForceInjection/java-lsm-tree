@@ -35,7 +35,7 @@ run_unit_tests() {
         -v "${HOME}/.m2":/root/.m2 \
         -w /workspace \
         maven:3.8.6-openjdk-8 \
-        mvn -q -DskipTests=false -DfailIfNoTests=false -Dtest.data.base.path="test-suite/results/sessions/${TEST_SESSION_ID}" clean test jacoco:report > "${unit_log}" 2>&1
+        bash -lc "mvn -q -T 1C -Dmaven.test.skip=false -DskipTests=false -DfailIfNoTests=false -DforkCount=1C -DreuseForks=true -DtrimStackTrace=true -Dtest.data.base.path=\"test-suite/results/sessions/${TEST_SESSION_ID}\" test jacoco:report" > "${unit_log}" 2>&1
     local exit_code=$?
     
     # 执行覆盖率门禁检查
@@ -233,6 +233,21 @@ run_performance_benchmarks() {
         sleep 2
     done
     
+    # 追加：运行一次仅缓存对比基准测试
+    log_benchmark "运行缓存对比基准测试 (有缓存 vs 无缓存)..."
+    local cache_results_file="${SESSION_PERFORMANCE_DIR}/cache_benchmark_$(get_timestamp).txt"
+    docker run --rm \
+        -v "${PROJECT_ROOT}":/workspace \
+        -v "${HOME}/.m2":/root/.m2 \
+        -w /workspace \
+        maven:3.8.6-openjdk-8 \
+        bash -lc "timeout ${PERFORMANCE_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.BenchmarkRunner' -Dexec.args='--operations ${BENCHMARK_OPERATIONS} --threads ${BENCHMARK_THREADS} --key-size ${BENCHMARK_KEY_SIZE} --value-size ${BENCHMARK_VALUE_SIZE} --data-dir test-suite/results/sessions/${TEST_SESSION_ID}/performance/cache_only --only-cache-benchmark' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" >> "${cache_results_file}" 2>&1
+    if [ $? -eq 0 ]; then
+        record_test_result "$test_results_file" "performance" "cache_vs_no_cache" "PASS"
+    else
+        record_test_result "$test_results_file" "performance" "cache_vs_no_cache" "FAIL"
+    fi
+
     # 生成性能测试汇总
     generate_performance_summary
     
@@ -242,6 +257,35 @@ run_performance_benchmarks() {
     log_info "结果文件: ${results_file}"
 }
 
+# 仅运行缓存对比基准测试
+run_cache_only_benchmark() {
+    update_test_status "performance" "running"
+    log_benchmark "仅运行缓存对比基准测试..."
+
+    local test_results_file="${SESSION_DIR}/test_results.json"
+    start_test_category "$test_results_file" "performance"
+
+    local cache_dir="${SESSION_PERFORMANCE_DIR}"
+    mkdir -p "${cache_dir}"
+    local cache_results_file="${cache_dir}/cache_benchmark_only_$(get_timestamp).txt"
+
+    docker run --rm \
+        -v "${PROJECT_ROOT}":/workspace \
+        -v "${HOME}/.m2":/root/.m2 \
+        -w /workspace \
+        maven:3.8.6-openjdk-8 \
+        bash -lc "timeout ${PERFORMANCE_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.BenchmarkRunner' -Dexec.args='--operations ${BENCHMARK_OPERATIONS} --threads ${BENCHMARK_THREADS} --key-size ${BENCHMARK_KEY_SIZE} --value-size ${BENCHMARK_VALUE_SIZE} --data-dir test-suite/results/sessions/${TEST_SESSION_ID}/performance/cache_only --only-cache-benchmark' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" >> "${cache_results_file}" 2>&1
+    if [ $? -eq 0 ]; then
+        record_test_result "$test_results_file" "performance" "cache_vs_no_cache" "PASS"
+    else
+        record_test_result "$test_results_file" "performance" "cache_vs_no_cache" "FAIL"
+    fi
+
+    update_test_status "performance" "completed"
+    complete_test_category "$test_results_file" "performance" "completed"
+    log_success "缓存对比基准测试完成"
+    log_info "结果文件: ${cache_results_file}"
+}
 # 生成性能测试汇总
 generate_performance_summary() {
     local summary_file="${SESSION_PERFORMANCE_DIR}/performance_summary.txt"
@@ -465,6 +509,9 @@ run_test_by_type() {
             ;;
         "performance"|"perf")
             run_performance_benchmarks
+            ;;
+        "cache"|"cache-benchmark"|"cbench")
+            run_cache_only_benchmark
             ;;
         "memory"|"mem")
             run_memory_tests

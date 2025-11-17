@@ -4,6 +4,7 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Sorted String Table (SSTable) 实现
@@ -63,18 +64,11 @@ public class SSTable {
      * 将排序数据写入文件
      */
     private void writeToFile(List<KeyValue> sortedData) throws IOException {
-        try (DataOutputStream dos = new DataOutputStream(
-                new BufferedOutputStream(new FileOutputStream(filePath)))) {
-
-            // 写入条目数量
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try (DataOutputStream dos = new DataOutputStream(new BufferedOutputStream(baos))) {
             dos.writeInt(sortedData.size());
-
-            // 写入所有数据条目
             for (KeyValue kv : sortedData) {
-                // 添加到布隆过滤器
                 bloomFilter.add(kv.getKey());
-
-                // 写入数据：key, deleted, value(如果不是删除), timestamp
                 dos.writeUTF(kv.getKey());
                 dos.writeBoolean(kv.isDeleted());
                 if (!kv.isDeleted()) {
@@ -82,6 +76,26 @@ public class SSTable {
                 }
                 dos.writeLong(kv.getTimestamp());
             }
+        }
+        byte[] payload = baos.toByteArray();
+        try {
+            AsyncIOManager io = AsyncIO.get();
+            CompletableFuture<Void> f = io.writeAsync(filePath, 0, payload)
+                    .thenCompose(v -> {
+                        try {
+                            return io.syncAsync(filePath);
+                        } catch (IOException e) {
+                            CompletableFuture<Void> cf = new CompletableFuture<>();
+                            cf.completeExceptionally(e);
+                            return cf;
+                        }
+                    });
+            f.join();
+        } catch (RuntimeException e) {
+            Throwable c = e.getCause();
+            if (c instanceof IOException)
+                throw (IOException) c;
+            throw e;
         }
     }
 
@@ -105,14 +119,37 @@ public class SSTable {
         }
         byte[] payload = baos.toByteArray();
         byte[] compressed = compression.compress(payload);
-        try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(filePath)))) {
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(bos))) {
             out.writeBytes("LSM1");
             String type = compression.getType();
             String four = (type + "    ").substring(0, 4);
             out.writeBytes(four);
             out.write(compressed);
         }
+        byte[] all = bos.toByteArray();
+        try {
+            AsyncIOManager io = AsyncIO.get();
+            CompletableFuture<Void> f = io.writeAsync(filePath, 0, all)
+                    .thenCompose(v -> {
+                        try {
+                            return io.syncAsync(filePath);
+                        } catch (IOException e) {
+                            CompletableFuture<Void> cf = new CompletableFuture<>();
+                            cf.completeExceptionally(e);
+                            return cf;
+                        }
+                    });
+            f.join();
+        } catch (RuntimeException e) {
+            Throwable c = e.getCause();
+            if (c instanceof IOException)
+                throw (IOException) c;
+            throw e;
+        }
     }
+
+    private static final long MAP_THRESHOLD_BYTES = Long.getLong("lsm.sstable.map.threshold.bytes", 16L * 1024 * 1024);
 
     private DataInputStream openPayloadInput() throws IOException {
         FileInputStream fis = new FileInputStream(filePath);
@@ -141,8 +178,23 @@ public class SSTable {
             }
         } else {
             bis.reset();
+            long size = new java.io.File(filePath).length();
+            if (size >= MAP_THRESHOLD_BYTES) {
+                bis.close();
+                try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(filePath, "r"); java.nio.channels.FileChannel fc = raf.getChannel()) {
+                    java.nio.MappedByteBuffer mbb = fc.map(java.nio.channels.FileChannel.MapMode.READ_ONLY, 0, size);
+                    return new DataInputStream(new BufferedInputStream(new ByteBufferBackedInputStream(mbb)));
+                }
+            }
             return new DataInputStream(bis);
         }
+    }
+
+    private static class ByteBufferBackedInputStream extends InputStream {
+        private final java.nio.ByteBuffer buf;
+        ByteBufferBackedInputStream(java.nio.ByteBuffer buf) { this.buf = buf; }
+        @Override public int read() { if (!buf.hasRemaining()) return -1; return buf.get() & 0xFF; }
+        @Override public int read(byte[] bytes, int off, int len) { if (!buf.hasRemaining()) return -1; int toRead = Math.min(len, buf.remaining()); buf.get(bytes, off, toRead); return toRead; }
     }
 
     /**
@@ -163,7 +215,7 @@ public class SSTable {
                 if (!deleted) {
                     value = dis.readUTF();
                 }
-                
+
                 // 读取时间戳但不使用（为了向前兼容文件格式）
                 dis.readLong();
                 if (currentKey.equals(key)) {

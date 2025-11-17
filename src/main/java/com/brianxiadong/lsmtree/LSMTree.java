@@ -28,6 +28,7 @@ public class LSMTree implements AutoCloseable {
     private final CompactionStrategy compactionStrategy;
     private final CompressionStrategy compressionStrategy;
     private final LSMTreeMetrics metrics;
+    private com.brianxiadong.lsmtree.cache.CacheManager cacheManager;
 
     // WAL (Write-Ahead Log) 相关
     private final WriteAheadLog wal;
@@ -51,7 +52,7 @@ public class LSMTree implements AutoCloseable {
         this.metrics = new MicrometerLSMTreeMetrics("default");
 
         // 初始化WAL
-        this.wal = new WriteAheadLog(dataDir + "/wal.log");
+        this.wal = new WriteAheadLog(dataDir + "/wal.log", Integer.getInteger("lsm.wal.sync.batch", 64), Long.getLong("lsm.wal.sync.interval.ms", 50L));
 
         io.micrometer.core.instrument.MeterRegistry registry = MetricsRegistry.get();
         io.micrometer.core.instrument.Gauge.builder("lsm.memtable.size", this, t -> t.activeMemTable.size())
@@ -83,6 +84,10 @@ public class LSMTree implements AutoCloseable {
         MetricsHttpServer.startIfEnabled();
     }
 
+    public void setCacheManager(com.brianxiadong.lsmtree.cache.CacheManager cacheManager) {
+        this.cacheManager = cacheManager;
+    }
+
     /**
      * 插入键值对
      */
@@ -103,6 +108,12 @@ public class LSMTree implements AutoCloseable {
             // 检查是否需要刷盘
             if (activeMemTable.shouldFlush()) {
                 flushMemTable();
+            }
+            if (cacheManager != null) {
+                com.brianxiadong.lsmtree.KeyValue kv = new com.brianxiadong.lsmtree.KeyValue(key, value, System.currentTimeMillis(), false);
+                try {
+                    cacheManager.put(key, kv, com.brianxiadong.lsmtree.cache.CacheType.ROW);
+                } catch (com.brianxiadong.lsmtree.cache.CacheException ignored) {}
             }
         } finally {
             lock.writeLock().unlock();
@@ -131,6 +142,12 @@ public class LSMTree implements AutoCloseable {
             if (activeMemTable.shouldFlush()) {
                 flushMemTable();
             }
+            if (cacheManager != null) {
+                com.brianxiadong.lsmtree.KeyValue kv = com.brianxiadong.lsmtree.KeyValue.createTombstone(key);
+                try {
+                    cacheManager.put(key, kv, com.brianxiadong.lsmtree.cache.CacheType.ROW);
+                } catch (com.brianxiadong.lsmtree.cache.CacheException ignored) {}
+            }
         } finally {
             lock.writeLock().unlock();
         }
@@ -147,10 +164,23 @@ public class LSMTree implements AutoCloseable {
 
         lock.readLock().lock();
         try {
+            if (cacheManager != null) {
+                try {
+                    Object obj = cacheManager.get(key, com.brianxiadong.lsmtree.cache.CacheType.ROW);
+                    if (obj instanceof com.brianxiadong.lsmtree.KeyValue) {
+                        com.brianxiadong.lsmtree.KeyValue ck = (com.brianxiadong.lsmtree.KeyValue) obj;
+                        if (ck.isDeleted()) return null;
+                        return ck.getValue();
+                    }
+                } catch (com.brianxiadong.lsmtree.cache.CacheException ignored) {}
+            }
             KeyValue ent = activeMemTable.getEntry(key);
             if (ent != null) {
                 if (ent.isDeleted())
                     return null;
+                if (cacheManager != null) {
+                    try { cacheManager.put(key, ent, com.brianxiadong.lsmtree.cache.CacheType.ROW); } catch (com.brianxiadong.lsmtree.cache.CacheException ignored) {}
+                }
                 return ent.getValue();
             }
 
@@ -160,6 +190,9 @@ public class LSMTree implements AutoCloseable {
                 if (e != null) {
                     if (e.isDeleted())
                         return null;
+                    if (cacheManager != null) {
+                        try { cacheManager.put(key, e, com.brianxiadong.lsmtree.cache.CacheType.ROW); } catch (com.brianxiadong.lsmtree.cache.CacheException ignored) {}
+                    }
                     return e.getValue();
                 }
             }
@@ -173,6 +206,9 @@ public class LSMTree implements AutoCloseable {
                 if (e != null) {
                     if (e.isDeleted())
                         return null;
+                    if (cacheManager != null) {
+                        try { cacheManager.put(key, e, com.brianxiadong.lsmtree.cache.CacheType.ROW); } catch (com.brianxiadong.lsmtree.cache.CacheException ignored) {}
+                    }
                     return e.getValue();
                 }
             }
@@ -200,7 +236,16 @@ public class LSMTree implements AutoCloseable {
             java.util.List<SSTable> tables = new java.util.ArrayList<>(ssTables);
             tables.sort((x, y) -> Long.compare(y.getCreationTime(), x.getCreationTime()));
             for (SSTable t : tables) {
-                sources.add(t.getRangeEntries(startKey, endKey, includeStart, includeEnd));
+                java.util.List<KeyValue> lst = t.getRangeEntries(startKey, endKey, includeStart, includeEnd);
+                sources.add(lst);
+                if (cacheManager != null) {
+                    try {
+                        com.brianxiadong.lsmtree.cache.CacheManagerImpl cm = (cacheManager instanceof com.brianxiadong.lsmtree.cache.CacheManagerImpl)
+                                ? (com.brianxiadong.lsmtree.cache.CacheManagerImpl) cacheManager : null;
+                        if (cm != null) cm.populateBlockForKeys(lst);
+                        for (KeyValue kv : lst) cacheManager.put(kv.getKey(), kv, com.brianxiadong.lsmtree.cache.CacheType.ROW);
+                    } catch (com.brianxiadong.lsmtree.cache.CacheException ignored) {}
+                }
             }
 
             java.util.List<KeyValue> out = new java.util.ArrayList<>();
@@ -481,6 +526,8 @@ public class LSMTree implements AutoCloseable {
         compactionExecutor.shutdownNow();
 
         MetricsHttpServer.stopIfRunning();
+
+        try { AsyncIO.closeDefault(); } catch (IOException ignored) {}
     }
 
     /**

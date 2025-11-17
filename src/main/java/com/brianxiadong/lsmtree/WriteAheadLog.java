@@ -1,86 +1,118 @@
 package com.brianxiadong.lsmtree;
 
 import java.io.*;
+import java.nio.ByteBuffer;
+import java.nio.channels.AsynchronousFileChannel;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * Write-Ahead Log 实现
- * 确保数据持久性和崩溃恢复
- */
 public class WriteAheadLog {
     private final String filePath;
-    private BufferedWriter writer;
+    private AsynchronousFileChannel channel;
     private final Object lock = new Object();
+    private final AtomicLong position = new AtomicLong(0L);
+    private final List<CompletableFuture<Void>> pendingWrites = new ArrayList<>();
+    private final int syncBatchSize;
+    private final long syncIntervalMillis;
+    private long lastSyncTimeMillis;
 
     public WriteAheadLog(String filePath) throws IOException {
-        this.filePath = filePath;
-        this.writer = new BufferedWriter(new FileWriter(filePath, true));
+        this(filePath, 1, 0L);
     }
 
-    /**
-     * 追加日志条目
-     */
+    public WriteAheadLog(String filePath, int syncBatchSize, long syncIntervalMillis) throws IOException {
+        this.filePath = filePath;
+        this.syncBatchSize = Math.max(1, syncBatchSize);
+        this.syncIntervalMillis = Math.max(0L, syncIntervalMillis);
+        this.lastSyncTimeMillis = System.currentTimeMillis();
+        File file = new File(filePath);
+        long initial = file.exists() ? file.length() : 0L;
+        this.position.set(initial);
+        this.channel = AsynchronousFileChannel.open(Paths.get(filePath), StandardOpenOption.WRITE,
+                StandardOpenOption.READ, StandardOpenOption.CREATE);
+    }
+
     public void append(LogEntry entry) throws IOException {
         synchronized (lock) {
-            writer.write(entry.toString());
-            writer.newLine();
-            writer.flush(); // 确保立即写入磁盘
+            byte[] bytes = (entry.toString() + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            ByteBuffer buf = ByteBuffer.wrap(bytes);
+            long pos = position.getAndAdd(bytes.length);
+            CompletableFuture<Void> cf = new CompletableFuture<>();
+            channel.write(buf, pos, null, new NioAsyncIOManager.CompletionHandlerImpl<>(written -> cf.complete(null),
+                    ex -> cf.completeExceptionally(ex)));
+            pendingWrites.add(cf);
+
+            boolean needSyncByBatch = pendingWrites.size() >= syncBatchSize;
+            boolean needSyncByTime = syncIntervalMillis > 0 && (System.currentTimeMillis() - lastSyncTimeMillis) >= syncIntervalMillis;
+
+            if (needSyncByBatch || needSyncByTime) {
+                try {
+                    CompletableFuture.allOf(pendingWrites.toArray(new CompletableFuture[0])).join();
+                    AsyncIO.get().syncAsync(filePath).join();
+                    pendingWrites.clear();
+                    lastSyncTimeMillis = System.currentTimeMillis();
+                } catch (RuntimeException e) {
+                    Throwable c = e.getCause();
+                    if (c instanceof IOException)
+                        throw (IOException) c;
+                    throw e;
+                }
+            }
         }
     }
 
-    /**
-     * 检查点操作 - 清理已刷盘的日志
-     */
     public void checkpoint() throws IOException {
         synchronized (lock) {
-            if (writer != null) {
-                writer.close();
+            if (channel != null)
+                channel.close();
+            if (!pendingWrites.isEmpty()) {
+                try {
+                    CompletableFuture.allOf(pendingWrites.toArray(new CompletableFuture[0])).join();
+                    AsyncIO.get().syncAsync(filePath).join();
+                } catch (RuntimeException ignored) {}
+                pendingWrites.clear();
             }
-
-            // 创建新的空WAL文件
             File file = new File(filePath);
-            if (file.exists()) {
+            if (file.exists())
                 file.delete();
-            }
-
-            // 重新打开writer
-            this.writer = new BufferedWriter(new FileWriter(filePath, true));
+            this.channel = AsynchronousFileChannel.open(Paths.get(filePath), StandardOpenOption.WRITE,
+                    StandardOpenOption.READ, StandardOpenOption.CREATE);
+            this.position.set(0L);
+            this.lastSyncTimeMillis = System.currentTimeMillis();
         }
     }
 
-    /**
-     * 从WAL恢复数据
-     */
     public List<LogEntry> recover() throws IOException {
         List<LogEntry> entries = new ArrayList<>();
         File file = new File(filePath);
-
-        if (!file.exists()) {
+        if (!file.exists())
             return entries;
-        }
-
         try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 LogEntry entry = LogEntry.fromString(line);
-                if (entry != null) {
+                if (entry != null)
                     entries.add(entry);
-                }
             }
         }
-
         return entries;
     }
 
-    /**
-     * 关闭WAL
-     */
     public void close() throws IOException {
         synchronized (lock) {
-            if (writer != null) {
-                writer.close();
+            if (!pendingWrites.isEmpty()) {
+                try {
+                    CompletableFuture.allOf(pendingWrites.toArray(new CompletableFuture[0])).join();
+                    AsyncIO.get().syncAsync(filePath).join();
+                } catch (RuntimeException ignored) {}
+                pendingWrites.clear();
             }
+            if (channel != null)
+                channel.close();
         }
     }
 
@@ -89,9 +121,6 @@ public class WriteAheadLog {
         return file.exists() ? file.length() : 0L;
     }
 
-    /**
-     * WAL日志条目
-     */
     public static class LogEntry {
         private final Operation operation;
         private final String key;
@@ -131,36 +160,27 @@ public class WriteAheadLog {
 
         @Override
         public String toString() {
-            return String.format("%s|%s|%s|%d",
-                    operation, key, value != null ? value : "", timestamp);
+            return String.format("%s|%s|%s|%d", operation, key, value != null ? value : "", timestamp);
         }
 
         public static LogEntry fromString(String line) {
-            if (line == null || line.trim().isEmpty()) {
+            if (line == null || line.trim().isEmpty())
                 return null;
-            }
-
             String[] parts = line.split("\\|", 4);
-            if (parts.length < 3) {
+            if (parts.length < 3)
                 return null;
-            }
-
             try {
                 Operation op = Operation.valueOf(parts[0]);
                 String key = parts[1];
                 String value = parts.length > 2 && !parts[2].isEmpty() ? parts[2] : null;
                 long timestamp = parts.length > 3 ? Long.parseLong(parts[3]) : System.currentTimeMillis();
-
                 return new LogEntry(op, key, value, timestamp);
             } catch (Exception e) {
-                return null; // 忽略无效的日志条目
+                return null;
             }
         }
     }
 
-    /**
-     * WAL操作类型
-     */
     public enum Operation {
         PUT, DELETE
     }
