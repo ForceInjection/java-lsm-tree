@@ -4,7 +4,7 @@
 
 在当今数据驱动的时代，数据库系统面临着前所未有的挑战。随着互联网应用的爆炸式增长、物联网设备的普及以及大数据分析需求的激增，传统的数据库存储结构正在遭遇性能瓶颈。**写密集型工作负载**、**海量数据存储需求**以及**对实时性能的严苛要求**，都在推动着数据库技术的革新。
 
-**LSM Tree（Log-Structured Merge Tree）**作为一种革命性的数据结构，正是在这样的背景下应运而生 [8]。它通过巧妙的设计理念，将写操作的性能提升到了一个新的高度，同时在读性能和存储效率方面也表现出色。从 Google 的 `BigTable` [9] 到 Apache `Cassandra`，从 `LevelDB` 到 `RocksDB`，LSM Tree 已经成为现代 NoSQL 数据库和分布式存储系统的核心技术。
+**LSM Tree（Log-Structured Merge Tree）**作为一种革命性的数据结构，正是在这样的背景下应运而生 [1]。它通过巧妙的设计理念，将写操作的性能提升到了一个新的高度，同时在读性能和存储效率方面也表现出色。从 Google 的 `BigTable` [2] 到 Apache `Cassandra`，从 `LevelDB` 到 `RocksDB`，LSM Tree 已经成为现代 NoSQL 数据库和分布式存储系统的核心技术。
 
 本章将从存储系统的基础原理出发，逐步分析硬件性能特性、数据库面临的挑战，以及传统数据库结构的局限性，最终引出 LSM Tree 设计的必要性和合理性。
 
@@ -53,13 +53,13 @@
 
 ### 1.2 存储硬件性能特性
 
-现代存储系统呈现明显的**层次化特征**，从 CPU 缓存到机械硬盘，**访问延迟跨越 7 个数量级**（纳秒到毫秒）[1]。不同存储介质的**顺序访问**与**随机访问**性能差异巨大，特别是机械硬盘的随机访问性能比顺序访问低 **390 倍** [2,3]，这种性能特性直接影响了数据库系统的设计选择，也是 LSM Tree 等写优化数据结构诞生的重要背景 [4]。
+现代存储系统呈现明显的**层次化特征**，从 CPU 缓存到机械硬盘，**访问延迟跨越 7 个数量级**（纳秒到毫秒）[3]。不同存储介质的**顺序访问**与**随机访问**性能差异巨大，特别是机械硬盘的随机访问性能比顺序访问低 **390 倍** [4,5]，这种性能特性直接影响了数据库系统的设计选择，也是 LSM Tree 等写优化数据结构诞生的重要背景 [6]。
 
 #### 1.2.1 存储设备延迟分析
 
 **机械硬盘 (HDD) 延迟组成**：
 
-- **寻道时间 (Seek Time)**：磁头移动到目标磁道的时间，通常为 3-15ms [1]
+- **寻道时间 (Seek Time)**：磁头移动到目标磁道的时间，通常为 3-15ms [3]
 - **旋转延迟 (Rotational Latency)**：等待目标扇区旋转到磁头下方的时间，平均为半圈旋转时间
   - 7200 RPM：平均 4.17ms
   - 15000 RPM：平均 2ms
@@ -69,9 +69,9 @@
 
 **固态硬盘 (SSD) 延迟组成**：
 
-- **SATA SSD**：70-200μs，无机械延迟，主要为闪存访问和控制器处理时间 [5]
-- **NVMe SSD**：20-100μs，通过 PCIe 直连 CPU，减少协议开销 [6]
-- **Intel Optane**：低至 14μs，使用 3D XPoint 技术 [5]
+- **SATA SSD**：70-200μs，无机械延迟，主要为闪存访问和控制器处理时间 [7]
+- **NVMe SSD**：20-100μs，通过 PCIe 直连 CPU，减少协议开销 [8]
+- **Intel Optane**：低至 14μs，使用 3D XPoint 技术 [7]
 
 **延迟差异的根本原因**：
 
@@ -83,20 +83,20 @@
 
 | **性能指标**       | **机械硬盘 (HDD)** | **SATA SSD**            | **NVMe SSD**                 |
 | ------------------ | ------------------ | ----------------------- | ---------------------------- |
-| **顺序读取**       | 150-200 MB/s [2,3] | 500-550 MB/s [5]        | 7,000-14,000 MB/s [6,7]      |
-| **顺序写入**       | 150-200 MB/s [2,3] | 450-520 MB/s [5]        | 5,000-12,000 MB/s [6,7]      |
-| **随机读取 (4KB)** | 75-150 IOPS [2,3]  | 75,000-100,000 IOPS [5] | 500,000-3,300,000 IOPS [6,7] |
+| **顺序读取**       | 150-200 MB/s [4,5] | 500-550 MB/s [7]        | 7,000-14,000 MB/s [8,9]      |
+| **顺序写入**       | 150-200 MB/s [4,5] | 450-520 MB/s [7]        | 5,000-12,000 MB/s [8,9]      |
+| **随机读取 (4KB)** | 75-150 IOPS [4,5]  | 75,000-100,000 IOPS [7] | 500,000-3,300,000 IOPS [8,9] |
 |                    | (0.3-0.6 MB/s)     | (300-400 MB/s)          | (2,000-13,200 MB/s)          |
-| **随机写入 (4KB)** | 75-150 IOPS [2,3]  | 80,000-90,000 IOPS [5]  | 400,000-1,400,000 IOPS [6,7] |
+| **随机写入 (4KB)** | 75-150 IOPS [4,5]  | 80,000-90,000 IOPS [7]  | 400,000-1,400,000 IOPS [8,9] |
 |                    | (0.3-0.6 MB/s)     | (320-360 MB/s)          | (1,600-5,600 MB/s)           |
-| **访问延迟**       | 10-15 ms [1]       | 70-200 μs [1,5]         | 20-100 μs [1,6]              |
-| **寻道时间**       | 3-15 ms [1]        | N/A (无机械部件)        | N/A (无机械部件)             |
+| **访问延迟**       | 10-15 ms [3]       | 70-200 μs [3,7]         | 20-100 μs [3,8]              |
+| **寻道时间**       | 3-15 ms [3]        | N/A (无机械部件)        | N/A (无机械部件)             |
 
-> **数据来源说明**：以上性能数据综合自多个权威技术报告和基准测试 [1-7]，包括：
+> **数据来源说明**：以上性能数据综合自多个权威技术报告和基准测试 [3-9]，包括：
 >
-> - **HDD 性能数据**：基于 7200 RPM SATA 和 15K SAS 硬盘的标准测试 [1,2,3]
-> - **SATA SSD 性能数据**：基于主流消费级和企业级 SATA SSD 的评测 [1,5]
-> - **NVMe SSD 性能数据**：基于 PCIe 3.0/4.0 NVMe SSD 的专业评测 [1,6,7]
+> - **HDD 性能数据**：基于 7200 RPM SATA 和 15K SAS 硬盘的标准测试 [3,4,5]
+> - **SATA SSD 性能数据**：基于主流消费级和企业级 SATA SSD 的评测 [3,7]
+> - **NVMe SSD 性能数据**：基于 PCIe 3.0/4.0 NVMe SSD 的专业评测 [3,8,9]
 >
 > 实际性能可能因具体产品型号、测试条件、工作负载模式和系统配置而有所差异。
 
@@ -1567,23 +1567,19 @@ LSM Tree 采用分层存储架构，每一层都有明确的设计目标：
 
 MemTable 采用 SkipList（跳表）作为核心数据结构，提供 O(log n) 的查找、插入和删除性能。SkipList 是由 William Pugh 在 1990 年提出的概率性数据结构 [11]，通过多层索引实现高效的有序数据访问。
 
-**SkipList 结构设计**：
-
 ```text
                     SkipList 多层索引结构 (最大层数: 32)
 
-Level 3: HEAD ──────────────────────────────────────────────────────────→ NULL
-         │                                                               ↑
-         ▼                                                               │
-Level 2: HEAD ──────────────────────────→ [30] ──────────────────────────→ NULL
-         │                               │ │                             ↑
-         ▼                               ▼ ▼                             │
-Level 1: HEAD ──────────→ [10] ──────────→ [30] ──────────→ [50] ──────────→ NULL
-         │               │ │             │ │             │ │             ↑
-         ▼               ▼ ▼             ▼ ▼             ▼ ▼             │
+Level 3: HEAD ─────────────────────────────────────────────────────────────→ NULL
+         │
+         ▼
+Level 2: HEAD ───────────────────────────→ [30] ───────────────────────────→ NULL
+         │                                  │
+         ▼                                  ▼
+Level 1: HEAD ──────→ [10] ──────────────→ [30] ──────────────→ [50] ──────→ NULL
+         │              │                   │                     │
+         ▼              ▼                   ▼                     ▼
 Level 0: HEAD → [5] → [10] → [15] → [20] → [30] → [35] → [40] → [50] → [60] → NULL
-         │     │ │   │ │   │ │   │ │   │ │   │ │   │ │   │ │   │ │   ↑
-         └─────┴─┴───┴─┴───┴─┴───┴─┴───┴─┴───┴─┴───┴─┴───┴─┴───┴─┴───┘
 
 节点结构详解:
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -1592,8 +1588,8 @@ Level 0: HEAD → [5] → [10] → [15] → [20] → [30] → [35] → [40] → 
 │  ┌─────────────────┐                                                    │
 │  │   节点 [30]      │                                                    │
 │  │ ┌─────────────┐ │  forward[3] ──→ NULL                               │
-│  │ │    Key: 30  │ │  forward[2] ──→ [50]                               │
-│  │ │  Value: ... │ │  forward[1] ──→ [35]                               │
+│  │ │    Key: 30  │ │  forward[2] ──→ NULL                               │
+│  │ │  Value: ... │ │  forward[1] ──→ [50]                               │
 │  │ │ Version: v1 │ │  forward[0] ──→ [35]                               │
 │  │ │ Height: 4   │ │                                                    │
 │  │ └─────────────┘ │  注：forward[i] 指向第i层的下一个节点                  │
@@ -1603,10 +1599,10 @@ Level 0: HEAD → [5] → [10] → [15] → [20] → [30] → [35] → [40] → 
 
 **查找过程示例** (查找 key = 35):
 
-1. 从 Level 3 开始: HEAD → NULL (35 > 30, 下降到 Level 2)
-2. Level 2: HEAD → [30] → NULL (35 > 30, 从[30]下降到 Level 1)
-3. Level 1: [30] → [50] (35 < 50, 从[30]下降到 Level 0)
-4. Level 0: [30] → [35] (找到目标节点)
+1. 从 Level 3 开始: HEAD → NULL (当前层无节点，下降到 Level 2)
+2. Level 2: HEAD → [30] → NULL (35 > 30，且节点[30] 的下一个节点是 NULL，因此从节点[30]下降到 Level 1)
+3. Level 1: [30] → [50] (35 < 50，因此从节点[30]下降到 Level 0)
+4. Level 0: 从[30]开始向右遍历 → [35] (找到目标节点)
 
 **时间复杂度**: O(log n)，空间复杂度: O(n)
 
@@ -1668,6 +1664,8 @@ Level 0: HEAD → [5] → [10] → [15] → [20] → [30] → [35] → [40] → 
 | **Immutable 队列长度** | 2-3 个     | 控制内存使用 | 避免内存溢出     |
 | **写入缓冲区大小**     | 4KB        | 批量写入优化 | 根据写入模式调整 |
 | **内存分配器**         | jemalloc   | 减少内存碎片 | 生产环境推荐     |
+
+> **注**：MemTable 大小阈值通常设置为 64MB，这个值在内存容量和刷盘频率之间提供了良好的平衡。过小的阈值会导致频繁刷盘，增加写放大；过大的阈值会增加内存使用和恢复时间。
 
 ### 4.3 SSTable 磁盘存储组件
 
@@ -2853,7 +2851,7 @@ Level 1: [SST8: A-D] [SST9: E-H] [SST10: I-L]
 
 ---
 
-## 结语
+## 6. 结语
 
 LSM Tree 作为现代存储系统的核心技术，从 1996 年的经典论文到今天的广泛应用，经历了近 30 年的发展历程。它不仅解决了写密集型应用的性能问题，更重要的是提供了一种全新的数据组织和管理思路。
 
@@ -2861,40 +2859,24 @@ LSM Tree 作为现代存储系统的核心技术，从 1996 年的经典论文�
 
 ---
 
-## 参考文献
+## 9. 参考文献
 
-[1] Super User. "Latency of SSDs versus HDDs." _Stack Exchange_, 2024. Available: <https://superuser.com/questions/1414662/latency-of-ssds-versus-hdds>
-
-[2] TechTarget. "NVMe SSD speeds explained: How fast can they go?" _SearchStorage_, 2024. Available: <https://www.techtarget.com/searchstorage/feature/NVMe-SSD-speeds-explained>
-
-[3] Tom's Hardware Community. "What is a good or normal read/write speed for a HDD?" _Tom's Hardware Forums_, 2024. Available: <https://forums.tomshardware.com/threads/what-is-a-good-or-normal-read-write-speed-for-a-hdd.2822841/>
-
-[4] VAST Data. "The Diminishing Performance of Disk-Based Storage." _VAST Data Blog_, 2024. Available: <https://www.vastdata.com/blog/the-diminishing-performance-of-disk-based-storage>
-
-[5] ExtremeTech. "Why latency impacts SSD performance more than bandwidth does." _ExtremeTech_, 2024. Available: <https://www.extremetech.com/computing/325146-why-latency-impacts-ssd-performance-more-than-bandwidth-does>
-
-[6] SimplyBlock. "NVMe Latency." _SimplyBlock Glossary_, 2024. Available: <https://www.simplyblock.io/glossary/nvme-latency/>
-
-[7] Server Fault. "HDD performance differences between 7.2k SATA and 15k SAS." _Stack Exchange_, 2024. Available: <https://serverfault.com/questions/512386/hdd-performance-differences-between-7-2k-sata-and-15k-sas>
-
-[8] O'Neil, P., Cheng, E., Gawlick, D., & O'Neil, E. (1996). The log-structured merge-tree (LSM-tree). _Acta Informatica_, 33(4), 351-385.
-
-[9] Chang, F., Dean, J., Ghemawat, S., Hsieh, W. C., Wallach, D. A., Burrows, M., ... & Gruber, R. E. (2008). Bigtable: A distributed storage system for structured data. _ACM Transactions on Computer Systems_, 26(2), 1-26.
-
-[10] Rosenblum, M., & Ousterhout, J. K. (1991). The design and implementation of a log-structured file system. _ACM Transactions on Computer Systems_, 10(1), 26-52.
-
-[11] Pugh, W. (1990). Skip lists: a probabilistic alternative to balanced trees. _Communications of the ACM_, 33(6), 668-676.
-
-[12] LZ4 Development Team. "LZ4 - Extremely fast compression." _GitHub_, 2024. Available: <https://github.com/lz4/lz4>
-
-[13] Google. "Snappy - A fast compressor/decompressor." _GitHub_, 2024. Available: <https://github.com/google/snappy>
-
-[14] Facebook. "Zstandard - Real-time data compression algorithm." _GitHub_, 2024. Available: <https://github.com/facebook/zstd>
-
-[15] Enterprise Storage Forum. "How Fast Are NVMe Speeds?" _Enterprise Storage Forum_, 2024. Available: <https://www.enterprisestorageforum.com/hardware/how-fast-are-nvme-speeds/>
-
-[16] AnandTech. "Intel SSD DC P3700 Review: The PCIe SSD Transition Begins with NVMe." _AnandTech_, 2014. Available: <https://www.anandtech.com/show/8104/intel-ssd-dc-p3700-review-the-pcie-ssd-transition-begins-with-nvme/3>
-
-[17] Bloom, B. H. (1970). Space/time trade-offs in hash coding with allowable errors. _Communications of the ACM_, 13(7), 422-426.
+1. O'Neil, P., Cheng, E., Gawlick, D., & O'Neil, E. (1996). The log-structured merge-tree (LSM-tree). _Acta Informatica_, 33(4), 351-385.
+2. Chang, F., Dean, J., Ghemawat, S., Hsieh, W. C., Wallach, D. A., Burrows, M., ... & Gruber, R. E. (2008). Bigtable: A distributed storage system for structured data. _ACM Transactions on Computer Systems_, 26(2), 1-26.
+3. Super User. "Latency of SSDs versus HDDs." _Stack Exchange_, 2024. Available: <https://superuser.com/questions/1414662/latency-of-ssds-versus-hdds>
+4. TechTarget. "NVMe SSD speeds explained: How fast can they go?" _SearchStorage_, 2024. Available: <https://www.techtarget.com/searchstorage/feature/NVMe-SSD-speeds-explained>
+5. Tom's Hardware Community. "What is a good or normal read/write speed for a HDD?" _Tom's Hardware Forums_, 2024. Available: <https://forums.tomshardware.com/threads/what-is-a-good-or-normal-read-write-speed-for-a-hdd.2822841/>
+6. VAST Data. "The Diminishing Performance of Disk-Based Storage." _VAST Data Blog_, 2024. Available: <https://www.vastdata.com/blog/the-diminishing-performance-of-disk-based-storage>
+7. ExtremeTech. "Why latency impacts SSD performance more than bandwidth does." _ExtremeTech_, 2024. Available: <https://www.extremetech.com/computing/325146-why-latency-impacts-ssd-performance-more-than-bandwidth-does>
+8. SimplyBlock. "NVMe Latency." _SimplyBlock Glossary_, 2024. Available: <https://www.simplyblock.io/glossary/nvme-latency/>
+9. Server Fault. "HDD performance differences between 7.2k SATA and 15k SAS." _Stack Exchange_, 2024. Available: <https://serverfault.com/questions/512386/hdd-performance-differences-between-7-2k-sata-and-15k-sas>
+10. Rosenblum, M., & Ousterhout, J. K. (1991). The design and implementation of a log-structured file system. _ACM Transactions on Computer Systems_, 10(1), 26-52.
+11. Pugh, W. (1990). Skip lists: a probabilistic alternative to balanced trees. _Communications of the ACM_, 33(6), 668-676.
+12. Enterprise Storage Forum. "How Fast Are NVMe Speeds?" _Enterprise Storage Forum_, 2024. Available: <https://www.enterprisestorageforum.com/hardware/how-fast-are-nvme-speeds/>
+13. LZ4 Development Team. "LZ4 - Extremely fast compression." _GitHub_, 2024. Available: <https://github.com/lz4/lz4>
+14. Google. "Snappy - A fast compressor/decompressor." _GitHub_, 2024. Available: <https://github.com/google/snappy>
+15. Facebook. "Zstandard - Real-time data compression algorithm." _GitHub_, 2024. Available: <https://github.com/facebook/zstd>
+16. AnandTech. "Intel SSD DC P3700 Review: The PCIe SSD Transition Begins with NVMe." _AnandTech_, 2014. Available: <https://www.anandtech.com/show/8104/intel-ssd-dc-p3700-review-the-pcie-ssd-transition-begins-with-nvme/3>
+17. Bloom, B. H. (1970). Space/time trade-offs in hash coding with allowable errors. _Communications of the ACM_, 13(7), 422-426.
 
 ---
