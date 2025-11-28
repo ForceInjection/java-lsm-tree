@@ -1568,7 +1568,8 @@ LSM Tree 采用分层存储架构，每一层都有明确的设计目标：
 MemTable 采用 SkipList（跳表）作为核心数据结构，提供 O(log n) 的查找、插入和删除性能。SkipList 是由 William Pugh 在 1990 年提出的概率性数据结构 [11]，通过多层索引实现高效的有序数据访问。
 
 ```text
-                    SkipList 多层索引结构 (最大层数: 32)
+                           SkipList 多层索引结构
+概率性层级分布 | Java ConcurrentSkipListMap 实现限制: 32层 | 生产常用: 12-16层
 
 Level 3: HEAD ─────────────────────────────────────────────────────────────→ NULL
          │

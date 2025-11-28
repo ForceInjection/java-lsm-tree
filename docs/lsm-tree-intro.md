@@ -184,7 +184,8 @@ MemTable 作为 LSM Tree 的内存缓冲区，负责接收写入请求并提供�
 MemTable 采用 SkipList（跳表）作为核心数据结构，提供高效的插入、查找和范围查询能力。SkipList 是由 William Pugh 在 1990 年提出的概率性数据结构 [3]：
 
 ```text
-                    SkipList 多层索引结构 (最大层数: 32)
+                           SkipList 多层索引结构
+概率性层级分布 | Java ConcurrentSkipListMap 实现限制: 32层 | 生产常用: 12-16层
 
 Level 3: HEAD ─────────────────────────────────────────────────────────────→ NULL
          │
