@@ -8,8 +8,8 @@
 
 - **理论掌握**: 深入理解 LSM Tree 的核心概念和设计原理
 - **代码理解**: 熟悉 Java 实现的各个组件和算法细节
-- **动手实践**: 通过编写测试、修改代码、性能调优等方式加深理解
-- **实战应用**: 能够在实际项目中应用 LSM Tree 技术
+- **实战落地**: 在 14 天内完成 **T1 (Range Query)** 和 **T2 (Data Compression)** 两个高级任务的开发
+- **工程能力**: 通过实际修改核心存储格式和查询引擎，提升系统级编程能力
 
 ## 3. 详细学习计划
 
@@ -137,6 +137,8 @@ public class MemTablePerformanceAnalysis {
 - [ ] 能够进行 MemTable 性能测试
 - [ ] 完成 MemTable 组件级性能分析
 
+> **高级任务关联**：内存管理优化详见 [memory-optimization-guide.md](../docs/memory-optimization-guide.md) 中的 OptimizedMemTable 使用
+
 ---
 
 ### 3.4 第 4 天：SSTable 磁盘存储格式
@@ -244,6 +246,8 @@ public class CrashRecoveryTest {
 - [ ] 理解 WAL 的持久性保证
 - [ ] 掌握崩溃恢复流程
 - [ ] 能够优化 WAL 性能
+
+> **高级任务关联**：WAL 性能优化详见 [advanced-io-optimization.md](../docs/advanced-io-optimization.md) 中的 P1: WAL 批量刷盘策略
 
 ---
 
@@ -416,302 +420,168 @@ public class TimeSeriesDB {
 
 ---
 
-### 3.11 第 11 天：扩展功能开发 - Range 查询
+### 3.11 第 11 天：实战 T1 - Range Query 基础实现
 
-#### 3.11.1 理论学习 (1-2 小时)
+#### 3.11.1 任务目标 (T1 Phase 1)
 
-- 阅读 [docs/performance-analysis-guide.md](../docs/performance-analysis-guide.md) 第 5-6 节
-- 理解压力测试的设计原理
+- 实现 `RangeQuery` 接口的基础框架
+- 实现多层数据（MemTable + SSTables）的 **Merging Iterator**
+- 完成 **正向范围查询 (Forward Scan)** 功能
 
-#### 3.11.2 工具学习 (1 小时)
+#### 3.11.2 关键技术点
 
-- 学习 test-suite 压力测试工具
+- **迭代器设计**: 统一 `Iterator<KeyValue>` 接口，屏蔽内存和磁盘差异
+- **归并排序**: 使用 `PriorityQueue` 实现多路归并
+- **边界处理**: 正确处理 `startKey` (inclusive/exclusive) 和 `endKey`
 
 #### 3.11.3 动手实践 (4 小时)
 
 ```java
-// 1. 实现Range查询功能
-public class RangeQuery {
-    // 范围查询接口设计
-    // 多层数据合并
-    // 结果去重和排序
+// 1. 定义统一迭代器接口
+public interface DBIterator extends Iterator<KeyValue> {
+    void seek(String key);
+    // ...
 }
 
-// 2. 性能测试和优化
-// 3. 边界条件测试
+// 2. 实现 MergingIterator
+public class MergingIterator implements DBIterator {
+    // 管理多个子迭代器 (MemTableIterator, SSTableIterator)
+    // 实时合并有序数据流
+}
+
+// 3. 单元测试
+// 验证跨多层数据的正向查询正确性
 ```
 
 #### 3.11.4 学习检查点
 
-- [ ] 实现 Range 查询功能
-- [ ] 理解多层数据合并
-- [ ] 掌握迭代器设计模式
+- [ ] 完成 `MergingIterator` 实现
+- [ ] 通过正向查询的单元测试
+- [ ] 理解多路归并对性能的影响
 
 ---
 
-### 3.12 第 12 天：扩展功能开发 - 数据压缩
+### 3.12 第 12 天：实战 T1 - Range Query 进阶与反向扫描
 
-#### 3.12.1 理论学习 (1-2 小时)
+#### 3.12.1 任务目标 (T1 Phase 2)
 
-- 阅读 [docs/performance-analysis-guide.md](../docs/performance-analysis-guide.md) 第 7-8 节
-- 理解高级优化技术
+- 实现高难度的 **反向范围查询 (Reverse Scan)**
+- 处理 **Tombstone (墓碑)** 标记，确保删除的数据在范围查询中不可见
+- 优化查询性能，减少不必要的 IO
 
-#### 3.12.2 代码分析 (1 小时)
+#### 3.12.2 关键技术点
 
-- 使用性能分析工具定位瓶颈
-- 分析 SSTable 的扩展点
-- 设计压缩接口
-- 理解序列化机制
+- **反向迭代**: 在单向链表（SkipList）和增量编码块中实现 `prev()` 操作的挑战
+- **去重逻辑**: 在合并过程中，高层数据覆盖底层数据（含 Tombstone 处理）
+- **性能优化**: 使用 BloomFilter 跳过不包含 range 的 SSTable（如果支持）
 
 #### 3.12.3 动手实践 (4 小时)
 
 ```java
-// 1. 实现数据压缩功能
-public class CompressionSupport {
-    // 压缩算法集成
-    // 压缩率统计
-    // 性能对比测试
-}
+// 1. 实现反向迭代器
+// MemTable: 使用 ConcurrentNavigableMap.descendingMap()
+// SSTable: 实现块内的反向读取（可能需要加载整个 Block）
 
-// 2. 压缩效果评估
-// 3. 自适应压缩策略
+// 2. 完善结果去重
+// 确保同一个 Key 的多个版本中，只返回最新的一个（如果是 Tombstone 则都不返回）
+
+// 3. 综合测试
+// 测试包含大量删除操作后的范围查询准确性
 ```
 
 #### 3.12.4 学习检查点
 
-- [ ] 实现数据压缩功能
-- [ ] 理解压缩算法特点
-- [ ] 能够评估压缩效果
+- [ ] 完成 T1 任务的所有验收标准
+- [ ] 反向查询性能符合预期
+- [ ] 删除数据的可见性处理正确
 
 ---
 
-### 3.13 第 13 天：监控与运维功能
+### 3.13 第 13 天：实战 T2 - Data Compression 实现
 
-#### 3.13.1 理论学习 (1-2 小时)
+#### 3.13.1 任务目标 (T2)
 
-- 阅读 [docs/performance-analysis-guide.md](../docs/performance-analysis-guide.md) 第 9-10 节
-- 理解生产环境的特殊要求
+- 修改 SSTable 文件格式，支持 Block 级压缩
+- 集成 **Snappy** 或 **LZ4** 压缩库
+- 实现压缩策略的配置化
 
-#### 3.13.2 代码阅读 (1 小时)
+#### 3.13.2 关键技术点
 
-- 分析现有的统计信息
-- 设计监控接口
-- 理解度量收集机制
+- **SSTable 格式变更**: 在 Block 写入磁盘前进行压缩，读取时解压
+- **库的选择**: 引入 `org.xerial.snappy:snappy-java` 或 `org.lz4:lz4-java`
+- **Buffer 管理**: 压缩/解压过程中避免频繁的内存分配
 
 #### 3.13.3 动手实践 (4 小时)
 
 ```java
-// 1. 实现监控系统
-public class LSMTreeMonitor {
-    // JMX Bean实现
-    // 性能指标收集
-    // 健康状态检查
+// 1. 引入依赖并封装 Compression 接口
+public interface Compression {
+    byte[] compress(byte[] data);
+    byte[] decompress(byte[] data);
 }
 
-// 2. 运维工具开发
-// 3. 告警机制实现
+// 2. 改造 SSTableWriter
+// 在 flush Block 到磁盘前调用 compress
+
+// 3. 改造 SSTableReader
+// 在读取 Block 后判断压缩标志并解压
 ```
 
 #### 3.13.4 学习检查点
 
-- [ ] 实现监控功能
-- [ ] 掌握 JMX 使用方法
-- [ ] 能够设计运维工具
+- [ ] 成功集成压缩库
+- [ ] 验证压缩后的 SSTable 文件体积显著减小
+- [ ] 确保读写流程在开启压缩后依然正常
 
 ---
 
-### 3.14 第 14 天：项目总结与进阶规划
+### 3.14 第 14 天：T1 & T2 集成测试与性能基准
 
-#### 3.14.1 理论学习 (2 小时)
+#### 3.14.1 任务目标
 
-- 阅读 [docs/performance-analysis-guide.md](../docs/performance-analysis-guide.md) 第 11-12 节
-- 总结 LSM Tree 的核心设计思想
+- 对完成的 **Range Query (T1)** 和 **Data Compression (T2)** 进行综合验收
+- 运行基准测试，对比开启/关闭压缩对吞吐量和延迟的影响
+- 总结 14 天的学习成果
 
-#### 3.14.2 代码回顾 (1 小时)
-
-- 回顾所有核心组件的实现
-- 整理代码笔记
-- 识别改进机会
-
-#### 3.14.3 动手实践 (3 小时)
+#### 3.14.2 动手实践 (4 小时)
 
 ```java
-// 1. 创建学习总结文档
-// 2. 整理代码示例库
-// 3. 设计个人项目计划
+// 1. 功能回归测试
+// 确保引入压缩后，Range Query 依然正确
+// 确保反向扫描在压缩块上工作正常
 
-// 4. 性能对比测试
-public class FinalBenchmark {
-    // 对比原始实现vs扩展功能
-    // 生成性能报告
-    // 制定优化建议
-}
+// 2. 性能基准对比 (Benchmark)
+// 场景 A: 纯写入 (开启压缩 vs 关闭压缩) -> 观察 IOPS 和磁盘占用
+// 场景 B: 范围查询 (开启压缩 vs 关闭压缩) -> 观察 CPU 使用率和延迟
+
+// 3. 编写 T1/T2 验收报告
 ```
 
-#### 3.14.4 最终性能分析总结 (2 小时)
+#### 3.14.3 成果总结
 
-```java
-// 1. 性能分析成果总结
-public class PerformanceAnalysisSummary {
-    // 汇总 14 天的性能分析数据
-    // 对比学习前后的性能理解深度
-    // 总结性能优化最佳实践
-    // 识别进一步优化的机会
-    // 制定性能监控和调优指南
-    // 编写性能分析方法论文档
-}
-```
+- **T1 成果**: 具备了类似数据库的 `SELECT * FROM table WHERE key BETWEEN a AND b` 能力
+- **T2 成果**: 磁盘空间节省 50%+, IO 吞吐量间接提升
+- **核心能力**: 完成了从"玩具 demo"到"具备基础生产特性引擎"的跨越
 
-#### 3.14.5 学习检查点
+#### 3.14.4 学习检查点
 
-- [ ] 完成学习总结
-- [ ] 制定进阶计划
-- [ ] 能够独立开发 LSM Tree 应用
-- [ ] 掌握系统性的性能分析方法
-- [ ] 具备性能调优的实战能力
+- [ ] 所有单元测试通过
+- [ ] 产出 T1/T2 性能对比报告
+- [ ] 代码符合项目规范，准备好合并
+- [ ] 准备好进入下一阶段 (T3+)
 
 ---
 
-## 4. 后续开发任务
+## 4. 毕业与进阶
 
-### 4.1 高级功能扩展
+恭喜你完成了 14 天的 LSM Tree 核心实战训练！你现在已经拥有了一个具备 **Range Query** 和 **Data Compression** 能力的存储引擎原型。
 
-1. **分区支持** - 实现数据分区机制，提高并发性能
-2. **更复杂的压缩策略** - 实现 Size-Tiered 压缩等其他策略
-3. **监控和度量** - 完善的监控体系和性能度量
-4. **分布式扩展** - 支持分布式部署和数据复制
+接下来的进阶之路，请参考项目中的其他专项文档：
 
-### 4.2 性能优化
+- **后续开发任务**: 详见 [advanced-tasks.md](./advanced-tasks.md) (包含 T3-T12 的完整开发路线图)
+- **性能分析指南**: 详见 [docs/performance-analysis-guide.md](../docs/performance-analysis-guide.md) (包含系统性性能优化方法论、工具使用和指标体系)
+- **更多学习资源**: 请查阅项目根目录的 [README.md](../README.md)
 
-1. **缓存机制** - 实现多级缓存提高读性能
-2. **异步 I/O** - 使用 NIO 提高 I/O 性能
-3. **内存管理优化** - 减少 GC 压力，提高稳定性
-4. **批量操作** - 支持批量写入和查询
-
-### 4.3 生产环境特性
-
-1. **配置管理** - 动态配置和热更新
-2. **故障恢复** - 更完善的故障检测和恢复机制
-3. **数据迁移** - 支持数据导入导出和迁移
-4. **安全机制** - 访问控制和数据加密
-
----
-
-## 5. 学习资源
-
-### 5.1 必读文档
-
-- [README.md](../README.md) - 项目概述和快速开始
-- [docs/lsm-tree-intro.md](../docs/lsm-tree-intro.md) - LSM Tree 基础理论
-- [docs/soucrce-code-analysis.md](../docs/soucrce-code-analysis.md) - 源码分析指南
-- [docs/performance-analysis-guide.md](../docs/performance-analysis-guide.md) - 性能分析指南
-- [tutorials/](../tutorials/) 目录下的所有教程文件
-
-### 5.2 性能分析专项资源
-
-- **性能分析指南**: [docs/performance-analysis-guide.md](../docs/performance-analysis-guide.md) 提供了完整的性能分析方法论
-- **JMH 官方文档**: [OpenJDK JMH](https://openjdk.java.net/projects/code-tools/jmh/)
-- **JProfiler 用户指南**: [JProfiler Documentation](https://www.ej-technologies.com/resources/jprofiler/help/doc/)
-- **VisualVM 教程**: [VisualVM Documentation](https://visualvm.github.io/documentation.html)
-
-### 5.3 推荐阅读
-
-- [The Log-Structured Merge-Tree (LSM-Tree)](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.44.2782&rep=rep1&type=pdf)
-- [LevelDB Documentation](https://github.com/google/leveldb/blob/main/doc/index.md)
-- [RocksDB Wiki](https://github.com/facebook/rocksdb/wiki)
-- [Java Performance Tuning Guide](https://docs.oracle.com/javase/8/docs/technotes/guides/vm/performance-enhancements-7.html)
-
----
-
-## 6. 学习建议
-
-### 6.1 核心学习方法
-
-1. **理论与实践结合** - 每天都要有代码实践
-2. **循序渐进** - 不要跳跃式学习，确保每个概念都理解透彻
-3. **多做实验** - 通过修改参数观察性能变化
-4. **记录笔记** - 记录学习过程中的思考和发现
-5. **主动思考** - 思考设计决策的原因和权衡
-6. **性能分析驱动** - 将性能分析作为每个学习阶段的核心任务
-
-### 6.2 性能分析学习重点
-
-#### 6.2.1 性能分析工具和方法
-
-- **JVM 性能监控**: 使用 JProfiler、VisualVM 等工具分析内存和 CPU 使用
-- **I/O 性能分析**: 监控磁盘读写性能，分析 I/O 瓶颈
-- **并发性能测试**: 使用 JMH (Java Microbenchmark Harness) 进行精确的性能测试
-- **系统级监控**: 使用 htop、iostat、sar 等系统工具监控资源使用
-
-#### 6.2.2 关键性能指标
-
-**写入性能指标**:
-
-- 写入吞吐量 (ops/sec)
-- 写入延迟分布 (P50, P95, P99)
-- MemTable 刷盘频率和耗时
-- WAL 写入性能
-
-**读取性能指标**:
-
-- 读取吞吐量 (ops/sec)
-- 读取延迟分布
-- 缓存命中率
-- 布隆过滤器效果
-
-**存储性能指标**:
-
-- 空间放大系数
-- 压缩效率和频率
-- 磁盘 I/O 利用率
-- 文件数量和大小分布
-
-**系统性能指标**:
-
-- 内存使用和 GC 影响
-- CPU 利用率分布
-- 线程池使用情况
-- 锁竞争分析
-
-#### 6.2.3 每日性能分析任务
-
-**第 1-3 天**: 建立性能基线
-
-- 搭建性能测试环境
-- 创建基准测试用例
-- 记录初始性能数据
-
-**第 4-6 天**: 组件级性能分析
-
-- 分析 MemTable 性能特征
-- 测试 SSTable 读写性能
-- 评估 WAL 对整体性能的影响
-
-**第 7-9 天**: 算法性能深度分析
-
-- 布隆过滤器性能调优
-- 压缩策略性能对比
-- 并发控制性能分析
-
-**第 10-12 天**: 整体系统性能优化
-
-- 端到端性能测试
-- 瓶颈识别和优化
-- 参数调优实验
-
-**第 13-14 天**: 性能分析总结
-
-- 性能优化效果评估
-- 性能分析报告编写
-- 最佳实践总结
-
-#### 6.2.4 性能分析实践建议
-
-1. **建立性能基线** - 在任何优化前先建立基准性能数据
-2. **单变量测试** - 每次只改变一个参数，观察性能影响
-3. **多场景测试** - 测试不同数据量、并发度、读写比例的场景
-4. **长期稳定性测试** - 进行长时间运行的稳定性和性能测试
-5. **性能回归检测** - 每次代码修改后都要进行性能回归测试
-6. **可视化分析** - 使用图表展示性能趋势和瓶颈点
+愿你在系统编程的道路上越走越远！
 
 ---

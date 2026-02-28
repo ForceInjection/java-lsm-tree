@@ -4,6 +4,41 @@
 
 基于 [README.md](../README.md) 中的规划功能和项目扩展需求，本文档详细列出了 Java LSM Tree 项目的高级开发任务。这些任务分为四个阶段，从核心功能扩展到生产环境特性，每个任务都包含详细的技术要求和验收标准。
 
+### 1.1 相关文档索引
+
+| 文档类型 | 文档名称                                                             | 说明                       |
+| -------- | -------------------------------------------------------------------- | -------------------------- |
+| 主文档   | [advanced-tasks.md](./advanced-tasks.md)                             | 高级开发任务总览（本文档） |
+| 技术方案 | [advanced-io-optimization.md](../docs/advanced-io-optimization.md)   | I/O 优化技术方案（P0-P4）  |
+| 技术方案 | [memory-optimization-guide.md](../docs/memory-optimization-guide.md) | 内存优化使用指南（T8）     |
+| 学习计划 | [learning-plan.md](./learning-plan.md)                               | 14 天循序渐进学习计划      |
+
+### 1.2 文档关系图
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                    advanced-tasks.md (主文档)                    │
+│                      高级开发任务总览与规划                         │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │
+          ┌─────────────────┼─────────────────┐
+          │                 │                 │
+          ▼                 ▼                 ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│ advanced-io-    │ │ memory-         │ │ learning-       │
+│ optimization.md │ │ optimization-   │ │ plan.md         │
+│ I/O优化技术方案   │ │ guide.md        │ │ 学习计划         │
+│ (T7详细设计)     │ │ 内存优化指南      │ │ (前置学习)       │
+│                 │ │ (T8使用指南)     │ │                 │
+└─────────────────┘ └─────────────────┘ └─────────────────┘
+```
+
+### 1.3 快速导航
+
+- **T7 异步 I/O 任务**：详细技术方案见 [advanced-io-optimization.md](../docs/advanced-io-optimization.md)
+- **T8 内存优化任务**：使用指南见 [memory-optimization-guide.md](../docs/memory-optimization-guide.md)
+- **学习路径**：开始前建议先完成 [learning-plan.md](./learning-plan.md) 的相关天数内容
+
 ## 2. 任务依赖关系与技术选型
 
 ### 2.1 任务依赖关系表
@@ -109,7 +144,7 @@
 **第一优先级（基础设施）**:
 
 1. 任务 4: Monitoring - 为后续性能优化提供数据支撑
-2. 任务 9: Configuration - 为所有功能提供配置基础
+2. 任务 9: Configuration - 为所有功能提供配置基础（建议尽早设计配置接口，避免后期大量重构）
 
 **第二优先级（核心功能）**: 3. 任务 1: Range Query - 核心查询功能 4. 任务 2: Data Compression - 存储优化
 
@@ -122,12 +157,13 @@
 #### 3.1.1 任务描述
 
 实现高效的范围查询功能，支持按键范围检索数据。
+**难点提示**：反向扫描（Reverse Scan）在基于单向链表（SkipList）或增量编码的 SSTable 中实现难度较大，需特别关注。
 
 #### 3.1.2 技术要求
 
 - 设计 `RangeQuery` 接口，支持开区间、闭区间查询
 - 实现多层数据合并算法（MemTable + 多个 SSTable）
-- 支持正向和反向迭代
+- 支持正向和反向迭代（Reverse Scan）
 - 实现结果去重和版本控制
 - 优化查询性能，减少不必要的文件访问
 
@@ -165,6 +201,7 @@ public interface RangeQuery {
 
 - 集成 Snappy 或 LZ4 压缩算法
 - 支持可配置的压缩策略
+- 考虑实现字典训练（Dictionary Training）或前缀编码（Prefix Encoding）以提升压缩率
 - 实现压缩率统计和监控
 - 保持读写性能的平衡
 - 支持压缩算法的热切换
@@ -217,7 +254,7 @@ public interface CompressionStrategy {
 
 #### 3.3.1 任务描述
 
-实现除 Leveled Compaction 外的其他合并策略。
+实现除 Leveled Compaction 外的其他合并策略，并确保空间有效回收。
 
 #### 3.3.2 技术要求
 
@@ -225,6 +262,7 @@ public interface CompressionStrategy {
 - 实现 Universal Compaction 策略
 - 支持动态切换合并策略
 - 优化合并触发条件和参数
+- 确保 Tombstone（墓碑标记）在合并过程中被正确清理（Space Reclamation）
 - 提供合并效果对比分析
 
 #### 3.3.3 核心实现
@@ -269,6 +307,7 @@ public class SizeTieredCompactionStrategy extends CompactionStrategy {
 
 - [ ] 实现至少 2 种新的合并策略
 - [ ] 支持策略参数的动态配置
+- [ ] 验证空间回收机制（删除数据后磁盘空间应在合并后释放）
 - [ ] 提供不同策略的性能对比报告
 - [ ] 通过长时间稳定性测试
 
@@ -320,7 +359,7 @@ public interface LSMTreeMetrics {
 
 #### 3.5.1 任务描述
 
-实现数据分区机制，提高并发性能和扩展性。
+实现数据分区机制，主要目标是通过分片减少锁竞争（Lock Contention），从而提高多核环境下的并发写入性能。
 
 #### 3.5.2 技术要求
 
@@ -388,12 +427,13 @@ public class ConsistentHashPartitionStrategy implements PartitionStrategy {
 
 #### 4.1.1 任务描述
 
-实现多级缓存系统，显著提高读性能。
+实现多级缓存系统，并结合 Bloom Filter 显著提高读性能。
 
 #### 4.1.2 技术要求
 
 - 实现 Block Cache（块缓存）
 - 实现 Row Cache（行缓存）
+- 优化 Bloom Filter 的使用，确保与缓存机制协同工作（Bloom Filter 过滤不存在的 Key -> Cache 命中热点 Key -> 磁盘读取）
 - 支持 LRU、LFU 等缓存策略
 - 实现缓存预热和失效机制
 - 提供缓存命中率统计
@@ -447,7 +487,16 @@ public interface CacheManager {
 
 #### 4.2.1 任务描述
 
-使用 NIO 和异步 I/O 提高系统吞吐量。
+使用 NIO 和异步 I/O 提高系统吞吐量，重点实现 Group Commit 机制。
+
+> **技术方案文档**：[T7: 异步 I/O (Async I/O) 优化技术方案](../docs/advanced-io-optimization.md)
+> 本文档提供了详细的 T7 技术实现方案，包含：
+>
+> - P0: Group Commit (批量提交) - **核心优化点**
+> - P1: WAL 批量刷盘策略
+> - P2: 异步读取优化
+> - P3: Direct I/O 支持
+> - P4: 可配置的持久性级别
 
 #### 4.2.2 技术要求
 
@@ -505,7 +554,16 @@ public interface AsyncIOManager {
 
 #### 4.3.1 任务描述
 
-优化内存使用，减少 GC 压力，提高系统稳定性。
+优化内存使用，减少 GC 压力，提高系统稳定性。重点关注堆外内存（Off-heap）的管理。
+
+> **技术方案文档**：[T8 内存优化技术方案与指南](../docs/memory-optimization-guide.md)
+> 本文档提供了 T8 的详细实施指南，包含：
+>
+> - MemoryManager 内存管理器使用
+> - 对象池 (ObjectPool) 使用方法
+> - 堆外内存管理
+> - GC 配置优化建议
+> - 性能基准测试方法
 
 #### 4.3.2 技术要求
 
@@ -583,11 +641,11 @@ public interface ConfigurationManager {
 
 #### 5.2.1 任务描述
 
-增强系统的故障检测和恢复能力。
+增强系统的故障检测和恢复能力，确保数据在 Crash 和 Corruption 场景下的安全性。
 
 #### 5.2.2 技术要求
 
-- 实现数据完整性校验
+- 实现数据完整性校验（CRC32C Checksum，覆盖读写路径）
 - 支持增量恢复
 - 实现自动故障检测
 - 支持多点故障恢复
@@ -690,12 +748,12 @@ public interface DataMigrationTool {
 
 #### 5.4.1 任务描述
 
-实现访问控制和数据加密功能。
+实现访问控制和数据加密功能，重点关注静态数据加密（Encryption at Rest）。
 
 #### 5.4.2 技术要求
 
-- 实现基于角色的访问控制（RBAC）
-- 支持数据加密存储
+- 实现基于角色的访问控制（RBAC）（可选，视部署形态而定）
+- 支持数据加密存储（Encryption at Rest）
 - 实现审计日志
 - 支持 SSL/TLS 通信加密
 - 实现密钥管理系统
