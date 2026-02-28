@@ -794,14 +794,17 @@ java-lsm-tree/
 - [✓] 范围查询性能测试
 - [✓] 指标监控服务器
 
-### 10.2 计划中
+### 10.2 计划中 (详情见 [advanced-tasks.md](learn/advanced-tasks.md))
 
-- [ ] 更复杂的压缩策略 (Size-tiered/Leveled)
-- [ ] 分区支持
-- [ ] 事务支持
-- [ ] 备份和恢复功能
-- [ ] 分布式部署支持
-- [ ] 更丰富的监控指标
+- [ ] **T1**: 范围查询 (Range Query) - 含反向扫描
+- [ ] **T2**: 数据压缩 (Data Compression) - Snappy/LZ4
+- [ ] **T3**: 高级合并策略 (Advanced Compaction) - Size-Tiered/Universal
+- [ ] **T4**: 监控与度量 (Monitoring) - Prometheus/Grafana
+- [ ] **T5**: 分区支持 (Partitioning) - 减少锁竞争
+- [ ] **T6**: 缓存机制 (Caching) - BlockCache + BloomFilter
+- [ ] **T7**: 异步 I/O (Async I/O) - Group Commit
+- [ ] **T8**: 内存优化 (Memory Optimization) - Off-heap/ObjectPool
+- [ ] **T9-T12**: 生产级特性 (配置、恢复、迁移、安全)
 
 ## 11. 贡献
 

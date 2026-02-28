@@ -20,10 +20,12 @@ public class MemTableTest {
 
     private MemTable memTable;
     private static final int DEFAULT_MAX_SIZE = 100;
+    private TestLogger log;
 
     @Before
     public void setUp() {
         memTable = new MemTable(DEFAULT_MAX_SIZE);
+        System.out.println("\n初始化MemTable: maxSize=" + DEFAULT_MAX_SIZE);
     }
 
     @After
@@ -36,13 +38,27 @@ public class MemTableTest {
      */
     @Test
     public void testBasicPutAndGet() {
-        // 测试基本插入和查询
+        log = new TestLogger("MemTable基本读写测试");
+        log.start("测试put和get基本操作");
+        
+        log.step("写入key1=value1, key2=value2");
         memTable.put("key1", "value1");
         memTable.put("key2", "value2");
+        log.data("当前大小", memTable.size());
 
-        assertEquals("value1", memTable.get("key1"));
-        assertEquals("value2", memTable.get("key2"));
-        assertNull(memTable.get("nonexistent"));
+        String v1 = memTable.get("key1");
+        String v2 = memTable.get("key2");
+        log.step("读取并验证数据");
+        log.data("key1值", v1);
+        log.data("key2值", v2);
+        assertEquals("value1", v1);
+        assertEquals("value2", v2);
+        log.assertSuccess("读取的值与写入的一致");
+        
+        String missing = memTable.get("nonexistent");
+        log.data("不存在的key返回", missing);
+        assertNull(missing);
+        log.pass();
     }
 
     /**
@@ -50,11 +66,21 @@ public class MemTableTest {
      */
     @Test
     public void testUpdate() {
+        log = new TestLogger("MemTable更新测试");
+        log.start("测试更新已存在的key");
+        
+        log.step("写入key1=value1");
         memTable.put("key1", "value1");
+        log.data("初始值", memTable.get("key1"));
         assertEquals("value1", memTable.get("key1"));
 
+        log.step("更新key1=updated_value");
         memTable.put("key1", "updated_value");
+        log.data("更新后的值", memTable.get("key1"));
+        log.data("更新后大小", memTable.size());
         assertEquals("updated_value", memTable.get("key1"));
+        log.assertSuccess("更新操作正确覆盖了原值");
+        log.pass();
     }
 
     /**
@@ -62,11 +88,20 @@ public class MemTableTest {
      */
     @Test
     public void testDelete() {
+        log = new TestLogger("MemTable删除测试");
+        log.start("测试删除key操作");
+        
+        log.step("写入并读取key1=value1");
         memTable.put("key1", "value1");
+        log.data("删除前的值", memTable.get("key1"));
         assertEquals("value1", memTable.get("key1"));
 
+        log.step("删除key1");
         memTable.delete("key1");
+        log.data("删除后的值", memTable.get("key1"));
         assertNull(memTable.get("key1"));
+        log.assertSuccess("删除后key返回null");
+        log.pass();
     }
 
     /**
@@ -74,8 +109,13 @@ public class MemTableTest {
      */
     @Test
     public void testDeleteAndReinsert() {
+        log = new TestLogger("删除后重新插入测试");
+        log.start("测试删除后重新插入数据");
+        
+        log.step("写入并删除key1");
         memTable.put("key1", "value1");
         memTable.delete("key1");
+        log.data("删除后的值", memTable.get("key1"));
         assertNull(memTable.get("key1"));
 
         memTable.put("key1", "new_value");

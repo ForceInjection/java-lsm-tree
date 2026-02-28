@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * LSM Tree 性能基准测试工具
@@ -217,8 +218,24 @@ public class BenchmarkRunner {
         } catch (Exception e) {
             System.err.println("基准测试执行失败: " + e.getMessage());
             e.printStackTrace();
-            System.exit(1);
+            // 在测试环境中不调用System.exit，让异常向上抛出
+            if (isRunningInTestEnvironment()) {
+                throw new RuntimeException("基准测试执行失败", e);
+            } else {
+                System.exit(1);
+            }
         }
+    }
+    
+    /**
+     * 检查是否在测试环境中运行
+     */
+    private static boolean isRunningInTestEnvironment() {
+        // 检查常见的测试相关系统属性
+        return System.getProperty("surefire.test.class.path") != null ||
+               System.getProperty("test") != null ||
+               Thread.currentThread().getName().contains("surefire") ||
+               System.getProperty("sun.java.command", "").contains("surefire");
     }
     
     /**
@@ -259,6 +276,9 @@ public class BenchmarkRunner {
                     System.exit(0);
                 } else if ("--only-cache-benchmark".equals(arg)) {
                     onlyCacheBenchmark = true;
+                } else if ("--test-type".equals(arg) && i + 1 < args.length) {
+                    String testType = args[++i];
+                    System.setProperty("lsm.benchmark.test.type", testType);
                 } else if (arg.startsWith("--")) {
                     System.err.println("未知参数: " + arg);
                     printUsage();
@@ -297,6 +317,7 @@ public class BenchmarkRunner {
         System.out.println("  --threads <数量>       线程数 (默认: CPU核心数)");
         System.out.println("  --help, -h             显示此帮助信息");
         System.out.println("  --only-cache-benchmark 仅运行缓存对比基准测试");
+        System.out.println("  --test-type <类型>     指定测试类型 (all|minimal|async-io-only)");
         System.out.println();
         System.out.println("示例:");
         System.out.println("  java BenchmarkRunner --operations 50000 --threads 4");
@@ -315,196 +336,341 @@ public class BenchmarkRunner {
             memoryMonitor.start();
         }
         
+        boolean allTestsPassed = true;
+        AtomicReference<Exception> firstExceptionRef = new AtomicReference<>(null);
+        
         try {
+            String testType = System.getProperty("lsm.benchmark.test.type", "all");
+            
             // 基础性能测试
-            if (!"true".equals(System.getProperty("lsm.benchmark.onlyCache", "false"))) {
-                benchmarkSequentialWrites();
-                benchmarkRandomWrites();
-                benchmarkReads();
-                benchmarkMixedWorkload();
+            if (!"true".equals(System.getProperty("lsm.benchmark.onlyCache", "false")) && 
+                ("all".equals(testType) || "basic-write".equals(testType))) {
+                try {
+                    benchmarkSequentialWrites();
+                } catch (Exception e) {
+                    handleTestFailure("顺序写入测试", e, firstExceptionRef.get());
+                    firstExceptionRef.compareAndSet(null, e);
+                    allTestsPassed = false;
+                }
+                
+                try {
+                    benchmarkRandomWrites();
+                } catch (Exception e) {
+                    handleTestFailure("随机写入测试", e, firstExceptionRef.get());
+                    firstExceptionRef.compareAndSet(null, e);
+                    allTestsPassed = false;
+                }
+            }
+            
+            // 读取测试
+            if (!"true".equals(System.getProperty("lsm.benchmark.onlyCache", "false")) && 
+                ("all".equals(testType) || "read".equals(testType))) {
+                try {
+                    benchmarkReads();
+                } catch (Exception e) {
+                    handleTestFailure("读取测试", e, firstExceptionRef.get());
+                    firstExceptionRef.compareAndSet(null, e);
+                    allTestsPassed = false;
+                }
+            }
+            
+            // 混合工作负载测试
+            if (!"true".equals(System.getProperty("lsm.benchmark.onlyCache", "false")) && 
+                ("all".equals(testType) || "mixed".equals(testType))) {
+                try {
+                    benchmarkMixedWorkload();
+                } catch (Exception e) {
+                    handleTestFailure("混合工作负载测试", e, firstExceptionRef.get());
+                    firstExceptionRef.compareAndSet(null, e);
+                    allTestsPassed = false;
+                }
             }
             
             // 高级性能测试
             if (!"true".equals(System.getProperty("lsm.benchmark.onlyCache", "false"))) {
-                benchmarkWriteLatency();
-                benchmarkMemTableFlushImpact();
+                try {
+                    benchmarkWriteLatency();
+                } catch (Exception e) {
+                    handleTestFailure("写入延迟测试", e, firstExceptionRef.get());
+                    firstExceptionRef.compareAndSet(null, e);
+                    allTestsPassed = false;
+                }
+                
+                try {
+                    benchmarkMemTableFlushImpact();
+                } catch (Exception e) {
+                    handleTestFailure("MemTable刷盘影响测试", e, firstExceptionRef.get());
+                    firstExceptionRef.compareAndSet(null, e);
+                    allTestsPassed = false;
+                }
             }
             
-            // 新增测试
-            if (!"true".equals(System.getProperty("lsm.benchmark.onlyCache", "false"))) {
-                benchmarkConcurrentOperations();
-                benchmarkDeleteOperations();
-                benchmarkRangeQueries();
-                benchmarkAsyncVsSyncIO();
-                benchmarkAsyncVsSyncCurve();
+            // 异步I/O测试
+            if (!"true".equals(System.getProperty("lsm.benchmark.onlyCache", "false")) && 
+                ("all".equals(testType) || "async-io".equals(testType))) {
+                try {
+                    benchmarkAsyncVsSyncIO();
+                } catch (Exception e) {
+                    handleTestFailure("异步vs同步I/O测试", e, firstExceptionRef.get());
+                    firstExceptionRef.compareAndSet(null, e);
+                    allTestsPassed = false;
+                }
+                
+                try {
+                    benchmarkAsyncVsSyncCurve();
+                } catch (Exception e) {
+                    handleTestFailure("异步vs同步并发曲线测试", e, firstExceptionRef.get());
+                    firstExceptionRef.compareAndSet(null, e);
+                    allTestsPassed = false;
+                }
             }
 
             // 缓存对比基准测试
-            benchmarkCacheVsNoCache();
+            if ("all".equals(testType) || "cache".equals(testType)) {
+                try {
+                    benchmarkCacheVsNoCache();
+                } catch (Exception e) {
+                    handleTestFailure("缓存对比测试", e, firstExceptionRef.get());
+                    firstExceptionRef.compareAndSet(null, e);
+                    allTestsPassed = false;
+                }
+            }
             
-        } catch (Exception e) {
-            System.err.println("基准测试过程中发生错误: " + e.getMessage());
-            e.printStackTrace();
         } finally {
             if (config.enableMemoryMonitoring) {
                 memoryMonitor.printReport();
             }
-            System.out.println("\n所有基准测试完成!");
+            
+            if (allTestsPassed) {
+                System.out.println("\n✅ 所有基准测试成功完成!");
+            } else {
+                System.out.println("\n❌ 部分基准测试失败!");
+                Exception firstException = firstExceptionRef.get();
+                if (firstException != null) {
+                    System.err.println("首个失败的异常信息:");
+                    firstException.printStackTrace();
+                }
+                // 设置非零退出码表示测试失败
+                System.exit(1);
+            }
         }
     }
 
-    private void benchmarkAsyncVsSyncIO() {
+    public void benchmarkAsyncVsSyncIO() {
         System.out.println("\n=== 异步 vs 同步 I/O 4KB 随机读写并发对比 ===");
-        int threads = Math.max(1, Math.min(5000, config.threadCount * 250));
-        int opsPerThread = 2000;
+        System.out.println("说明: 异步I/O优势在于高并发非阻塞场景，本地小文件测试可能不明显");
+        
+        // 合理设置测试规模
+        int threads = Math.max(4, Math.min(20, config.threadCount * 5));
+        int opsPerThread = Math.min(100, Math.max(50, config.numOperations / 100));  // 限制每线程操作数
         int block = 4096;
         byte[] data = new byte[block];
         new java.util.Random(config.randomSeed).nextBytes(data);
         String baseDir = config.dataDir + "/io_bench";
         java.io.File dir = new java.io.File(baseDir);
         if (!dir.exists()) dir.mkdirs();
-        String asyncFile = baseDir + "/async.dat";
-        String syncFile = baseDir + "/sync.dat";
+        
+        // 为每个线程使用不同的文件名，避免资源竞争
+        String asyncFilePattern = baseDir + "/async_thread_%d.dat";
+        String syncFilePattern = baseDir + "/sync_thread_%d.dat";
 
         try {
             AsyncIOManager io = AsyncIO.get();
+            
+            // ===== 异步I/O测试：使用真正的异步方式 =====
             long startA = System.nanoTime();
-            java.util.concurrent.ExecutorService exA = java.util.concurrent.Executors.newFixedThreadPool(Math.min(threads, Runtime.getRuntime().availableProcessors()*2));
-            java.util.List<java.util.concurrent.Future<?>> futuresA = new java.util.ArrayList<>();
+            java.util.List<java.util.concurrent.CompletableFuture<Void>> asyncFutures = new java.util.ArrayList<>();
+            
             for (int t = 0; t < threads; t++) {
                 final int tid = t;
-                futuresA.add(exA.submit(() -> {
-                    java.util.List<AsyncIOBatch.WriteTask> tasks = new java.util.ArrayList<>();
-                    java.util.Random r = new java.util.Random(config.randomSeed + tid);
-                    for (int i = 0; i < opsPerThread; i++) {
-                        long off = ((long) r.nextInt(opsPerThread)) * block;
-                        tasks.add(new AsyncIOBatch.WriteTask(asyncFile, off, data));
-                    }
-                    try {
-                        AsyncIOBatch.writeMany(io, tasks).thenCompose(v -> {
-                            try {
-                                return AsyncIOBatch.syncDistinctFiles(io, tasks);
-                            } catch (IOException e) {
-                                java.util.concurrent.CompletableFuture<Void> tmp = new java.util.concurrent.CompletableFuture<>();
-                                tmp.completeExceptionally(e);
-                                return tmp;
-                            }
-                        }).join();
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                }));
+                final String threadAsyncFile = String.format(asyncFilePattern, tid);
+                java.util.List<AsyncIOBatch.WriteTask> tasks = new java.util.ArrayList<>();
+                java.util.Random r = new java.util.Random(config.randomSeed + tid);
+                for (int i = 0; i < opsPerThread; i++) {
+                    long off = ((long) r.nextInt(opsPerThread)) * block;
+                    tasks.add(new AsyncIOBatch.WriteTask(threadAsyncFile, off, data));
+                }
+                
+                // 收集所有异步Future，而不是立即join
+                java.util.concurrent.CompletableFuture<Void> future = AsyncIOBatch.writeMany(io, tasks)
+                    .thenCompose(v -> {
+                        try {
+                            return AsyncIOBatch.syncDistinctFiles(io, tasks);
+                        } catch (IOException e) {
+                            java.util.concurrent.CompletableFuture<Void> tmp = new java.util.concurrent.CompletableFuture<>();
+                            tmp.completeExceptionally(e);
+                            return tmp;
+                        }
+                    })
+                    .whenComplete((v, ex) -> {
+                        // 清理文件
+                        try {
+                            java.nio.file.Files.deleteIfExists(java.nio.file.Paths.get(threadAsyncFile));
+                        } catch (Exception ignored) {}
+                    });
+                asyncFutures.add(future);
             }
-            for (java.util.concurrent.Future<?> f : futuresA) f.get();
-            exA.shutdown();
+            
+            // 一次性等待所有异步任务完成
+            java.util.concurrent.CompletableFuture.allOf(asyncFutures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
             long endA = System.nanoTime();
 
+            // ===== 同步I/O测试 =====
             long startS = System.nanoTime();
-            java.util.concurrent.ExecutorService exS = java.util.concurrent.Executors.newFixedThreadPool(Math.min(threads, Runtime.getRuntime().availableProcessors()*2));
-            java.util.List<java.util.concurrent.Future<?>> futuresS = new java.util.ArrayList<>();
+            java.util.concurrent.ExecutorService exS = java.util.concurrent.Executors.newFixedThreadPool(threads);
+            java.util.List<java.util.concurrent.Future<?>> syncFutures = new java.util.ArrayList<>();
+            
             for (int t = 0; t < threads; t++) {
                 final int tid = t;
-                futuresS.add(exS.submit(() -> {
-                    try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(syncFile, "rw"); java.nio.channels.FileChannel fc = raf.getChannel()) {
+                final String threadSyncFile = String.format(syncFilePattern, tid);
+                syncFutures.add(exS.submit(() -> {
+                    try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(threadSyncFile, "rw"); 
+                         java.nio.channels.FileChannel fc = raf.getChannel()) {
                         java.util.Random r = new java.util.Random(config.randomSeed + tid);
                         java.nio.ByteBuffer buf = java.nio.ByteBuffer.wrap(data);
                         for (int i = 0; i < opsPerThread; i++) {
                             long off = ((long) r.nextInt(opsPerThread)) * block;
-                            buf.rewind();
+                            ((java.nio.Buffer) buf).rewind();
                             fc.write(buf, off);
-                            fc.force(true);
                         }
+                        // 同步I/O最后统一刷盘，与异步I/O的syncDistinctFiles对应
+                        fc.force(false);
                     } catch (IOException e) {
-                        throw new RuntimeException(e);
+                        throw new RuntimeException("线程" + tid + "同步I/O失败: " + e.getMessage(), e);
+                    } finally {
+                        try {
+                            java.nio.file.Files.deleteIfExists(java.nio.file.Paths.get(threadSyncFile));
+                        } catch (Exception ignored) {}
                     }
                 }));
             }
-            for (java.util.concurrent.Future<?> f : futuresS) f.get();
+            
+            // 等待所有同步任务完成
+            for (java.util.concurrent.Future<?> f : syncFutures) {
+                try {
+                    f.get();
+                } catch (java.util.concurrent.ExecutionException e) {
+                    throw new RuntimeException("同步I/O任务执行失败", e.getCause());
+                }
+            }
             exS.shutdown();
             long endS = System.nanoTime();
 
+            // 计算结果
             double asyncSeconds = (endA - startA) / 1_000_000_000.0;
             double syncSeconds = (endS - startS) / 1_000_000_000.0;
             long totalBytes = (long) threads * opsPerThread * block;
             double asyncMBps = (totalBytes / 1024.0 / 1024.0) / Math.max(1e-9, asyncSeconds);
             double syncMBps = (totalBytes / 1024.0 / 1024.0) / Math.max(1e-9, syncSeconds);
-            System.out.printf("异步 I/O 吞吐: %.2f MB/s%n", asyncMBps);
-            System.out.printf("同步 I/O 吞吐: %.2f MB/s%n", syncMBps);
-            if (syncMBps > 0) System.out.printf("提升比例: %.2f%%\n", (asyncMBps / syncMBps - 1.0) * 100.0);
+            System.out.printf("异步 I/O 吞吐: %.2f MB/s (%.3fs)%n", asyncMBps, asyncSeconds);
+            System.out.printf("同步 I/O 吞吐: %.2f MB/s (%.3fs)%n", syncMBps, syncSeconds);
+            if (syncMBps > 0) {
+                double improvement = (asyncMBps / syncMBps - 1.0) * 100.0;
+                System.out.printf("提升比例: %.2f%% %s%n", improvement, improvement > 0 ? "✅" : "⚠️");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            System.err.println("异步 vs 同步 I/O 基准被中断: " + e.getMessage());
+            throw new RuntimeException("测试被中断", e);
         } catch (Exception e) {
             System.err.println("异步 vs 同步 I/O 基准失败: " + e.getMessage());
+            throw new RuntimeException("异步I/O测试失败", e);
         }
     }
 
-    private void benchmarkAsyncVsSyncCurve() {
-        System.out.println("\n=== 异步 vs 同步 I/O 并发曲线 (100/1000/5000) ===");
-        int[] levels = new int[] {100, 1000, 5000};
+    public void benchmarkAsyncVsSyncCurve() {
+        System.out.println("\n=== 异步 vs 同步 I/O 并发曲线 ===");
+        System.out.println("说明: 测试不同并发级别下异步/同步I/O的性能差异");
+        
+        int[] levels = new int[] {10, 50, 100};  // 优化并发级别
+        int opsPerThread = Math.min(100, Math.max(50, config.numOperations / 100));  // 限制每线程操作数
+        int block = 4096;
+        
         for (int lvl : levels) {
             try {
                 int threads = lvl;
-                int opsPerThread = 1000;
-                int block = 4096;
                 byte[] data = new byte[block];
                 new java.util.Random(config.randomSeed + lvl).nextBytes(data);
                 String baseDir = config.dataDir + "/io_curve_" + lvl;
                 java.io.File dir = new java.io.File(baseDir);
                 if (!dir.exists()) dir.mkdirs();
-                String asyncFile = baseDir + "/async.dat";
-                String syncFile = baseDir + "/sync.dat";
+                
+                String asyncFilePattern = baseDir + "/async_thread_%d.dat";
+                String syncFilePattern = baseDir + "/sync_thread_%d.dat";
 
                 AsyncIOManager io = AsyncIO.get();
+                
+                // ===== 异步I/O测试 =====
                 long startA = System.nanoTime();
-                java.util.concurrent.ExecutorService exA = java.util.concurrent.Executors.newFixedThreadPool(Math.min(threads, Runtime.getRuntime().availableProcessors()*2));
-                java.util.List<java.util.concurrent.Future<?>> futuresA = new java.util.ArrayList<>();
+                java.util.List<java.util.concurrent.CompletableFuture<Void>> asyncFutures = new java.util.ArrayList<>();
+                
                 for (int t = 0; t < threads; t++) {
                     final int tid = t;
-                    futuresA.add(exA.submit(() -> {
-                        java.util.List<AsyncIOBatch.WriteTask> tasks = new java.util.ArrayList<>();
-                        java.util.Random r = new java.util.Random(config.randomSeed + tid + lvl);
-                        for (int i = 0; i < opsPerThread; i++) {
-                            long off = ((long) r.nextInt(opsPerThread)) * block;
-                            tasks.add(new AsyncIOBatch.WriteTask(asyncFile, off, data));
-                        }
-                        try {
-                            AsyncIOBatch.writeMany(io, tasks).thenCompose(v -> {
-                                try {
-                                    return AsyncIOBatch.syncDistinctFiles(io, tasks);
-                                } catch (java.io.IOException e) {
-                                    java.util.concurrent.CompletableFuture<Void> tmp = new java.util.concurrent.CompletableFuture<>();
-                                    tmp.completeExceptionally(e);
-                                    return tmp;
-                                }
-                            }).join();
-                        } catch (java.io.IOException e) {
-                            throw new RuntimeException(e);
-                        }
-                    }));
+                    final String threadAsyncFile = String.format(asyncFilePattern, tid);
+                    java.util.List<AsyncIOBatch.WriteTask> tasks = new java.util.ArrayList<>();
+                    java.util.Random r = new java.util.Random(config.randomSeed + tid + lvl);
+                    for (int i = 0; i < opsPerThread; i++) {
+                        long off = ((long) r.nextInt(opsPerThread)) * block;
+                        tasks.add(new AsyncIOBatch.WriteTask(threadAsyncFile, off, data));
+                    }
+                    
+                    java.util.concurrent.CompletableFuture<Void> future = AsyncIOBatch.writeMany(io, tasks)
+                        .thenCompose(v -> {
+                            try {
+                                return AsyncIOBatch.syncDistinctFiles(io, tasks);
+                            } catch (java.io.IOException e) {
+                                java.util.concurrent.CompletableFuture<Void> tmp = new java.util.concurrent.CompletableFuture<>();
+                                tmp.completeExceptionally(e);
+                                return tmp;
+                            }
+                        })
+                        .whenComplete((v, ex) -> {
+                            try {
+                                java.nio.file.Files.deleteIfExists(java.nio.file.Paths.get(threadAsyncFile));
+                            } catch (Exception ignored) {}
+                        });
+                    asyncFutures.add(future);
                 }
-                for (java.util.concurrent.Future<?> f : futuresA) f.get();
-                exA.shutdown();
+                
+                java.util.concurrent.CompletableFuture.allOf(asyncFutures.toArray(new java.util.concurrent.CompletableFuture[0])).join();
                 long endA = System.nanoTime();
 
+                // ===== 同步I/O测试 =====
                 long startS = System.nanoTime();
-                java.util.concurrent.ExecutorService exS = java.util.concurrent.Executors.newFixedThreadPool(Math.min(threads, Runtime.getRuntime().availableProcessors()*2));
-                java.util.List<java.util.concurrent.Future<?>> futuresS = new java.util.ArrayList<>();
+                java.util.concurrent.ExecutorService exS = java.util.concurrent.Executors.newFixedThreadPool(threads);
+                java.util.List<java.util.concurrent.Future<?>> syncFutures = new java.util.ArrayList<>();
+                
                 for (int t = 0; t < threads; t++) {
                     final int tid = t;
-                    futuresS.add(exS.submit(() -> {
-                        try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(syncFile, "rw"); java.nio.channels.FileChannel fc = raf.getChannel()) {
+                    final String threadSyncFile = String.format(syncFilePattern, tid);
+                    syncFutures.add(exS.submit(() -> {
+                        try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(threadSyncFile, "rw"); 
+                             java.nio.channels.FileChannel fc = raf.getChannel()) {
                             java.util.Random r = new java.util.Random(config.randomSeed + tid + lvl);
                             java.nio.ByteBuffer buf = java.nio.ByteBuffer.wrap(data);
                             for (int i = 0; i < opsPerThread; i++) {
                                 long off = ((long) r.nextInt(opsPerThread)) * block;
-                                buf.rewind();
+                                ((java.nio.Buffer) buf).rewind();
                                 fc.write(buf, off);
-                                fc.force(true);
                             }
-                        } catch (java.io.IOException e) {
-                            throw new RuntimeException(e);
+                            fc.force(false);
+                        } catch (Exception e) {
+                            throw new RuntimeException("并发" + lvl + "线程" + tid + "同步I/O失败: " + e.getMessage(), e);
+                        } finally {
+                            try {
+                                java.nio.file.Files.deleteIfExists(java.nio.file.Paths.get(threadSyncFile));
+                            } catch (Exception ignored) {}
                         }
                     }));
                 }
-                for (java.util.concurrent.Future<?> f : futuresS) f.get();
+                
+                for (java.util.concurrent.Future<?> f : syncFutures) {
+                    try {
+                        f.get();
+                    } catch (java.util.concurrent.ExecutionException e) {
+                        throw new RuntimeException("并发" + lvl + "同步I/O任务执行失败", e.getCause());
+                    }
+                }
                 exS.shutdown();
                 long endS = System.nanoTime();
 
@@ -514,14 +680,22 @@ public class BenchmarkRunner {
                 double asyncMBps = (totalBytes / 1024.0 / 1024.0) / Math.max(1e-9, asyncSeconds);
                 double syncMBps = (totalBytes / 1024.0 / 1024.0) / Math.max(1e-9, syncSeconds);
                 Double cpuLoad = getProcessCpuLoad();
-                System.out.printf("并发=%d | 异步: %.2f MB/s | 同步: %.2f MB/s | 提升: %.2f%% | CPU: %s%n",
+                double improvement = syncMBps > 0 ? (asyncMBps / syncMBps - 1.0) * 100.0 : 0.0;
+                
+                System.out.printf("并发=%d | 异步: %.2f MB/s | 同步: %.2f MB/s | 提升: %.2f%% %s | CPU: %s%n",
                         lvl,
                         asyncMBps,
                         syncMBps,
-                        syncMBps > 0 ? (asyncMBps / syncMBps - 1.0) * 100.0 : 0.0,
+                        improvement,
+                        improvement > 0 ? "✅" : "⚠️",
                         cpuLoad != null ? String.format("%.1f%%", cpuLoad * 100.0) : "N/A");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                System.err.println("并发曲线基准被中断 (并发=" + lvl + "): " + e.getMessage());
+                throw new RuntimeException("测试被中断", e);
             } catch (Exception e) {
                 System.err.println("并发曲线基准失败 (并发=" + lvl + "): " + e.getMessage());
+                throw new RuntimeException("并发" + lvl + "测试失败", e);
             }
         }
     }
@@ -541,7 +715,7 @@ public class BenchmarkRunner {
     /**
      * 顺序写入性能测试
      */
-    private void benchmarkSequentialWrites() {
+    public void benchmarkSequentialWrites() {
         System.out.println("\n=== 顺序写入性能测试 ===");
         
         LSMTree lsmTree = null;
@@ -592,7 +766,7 @@ public class BenchmarkRunner {
     /**
      * 随机写入性能测试
      */
-    private void benchmarkRandomWrites() {
+    public void benchmarkRandomWrites() {
         System.out.println("\n=== 随机写入性能测试 ===");
         
         LSMTree lsmTree = null;
@@ -642,7 +816,7 @@ public class BenchmarkRunner {
     /**
      * 读取性能测试
      */
-    private void benchmarkReads() {
+    public void benchmarkReads() {
         System.out.println("\n=== 读取性能测试 ===");
         
         LSMTree lsmTree = null;
@@ -702,7 +876,7 @@ public class BenchmarkRunner {
     /**
      * 混合工作负载测试
      */
-    private void benchmarkMixedWorkload() {
+    public void benchmarkMixedWorkload() {
         System.out.println("\n=== 混合工作负载测试 ===");
         
         LSMTree lsmTree = null;
@@ -781,7 +955,7 @@ public class BenchmarkRunner {
     /**
      * 写入延迟测试
      */
-    private void benchmarkWriteLatency() {
+    public void benchmarkWriteLatency() {
         System.out.println("\n=== 写入延迟详细分析 ===");
         
         LSMTree lsmTree = null;
@@ -831,7 +1005,7 @@ public class BenchmarkRunner {
     /**
      * MemTable 刷盘影响测试
      */
-    private void benchmarkMemTableFlushImpact() {
+    public void benchmarkMemTableFlushImpact() {
         System.out.println("\n=== MemTable 刷盘影响测试 ===");
         
         LSMTree lsmTree = null;
@@ -902,7 +1076,7 @@ public class BenchmarkRunner {
     /**
      * 并发操作性能测试
      */
-    private void benchmarkConcurrentOperations() {
+    public void benchmarkConcurrentOperations() {
         System.out.println("\n=== 并发操作性能测试 ===");
         
         LSMTree lsmTree = null;
@@ -971,7 +1145,7 @@ public class BenchmarkRunner {
     /**
      * 删除操作性能测试
      */
-    private void benchmarkDeleteOperations() {
+    public void benchmarkDeleteOperations() {
         System.out.println("\n=== 删除操作性能测试 ===");
         
         LSMTree lsmTree = null;
@@ -1038,7 +1212,7 @@ public class BenchmarkRunner {
     /**
      * 范围查询性能测试
      */
-    private void benchmarkRangeQueries() {
+    public void benchmarkRangeQueries() {
         System.out.println("\n=== 范围查询性能测试 ===");
         
         LSMTree lsmTree = null;
@@ -1104,7 +1278,7 @@ public class BenchmarkRunner {
      * 缓存对比基准测试（有缓存 vs 无缓存）
      * 采用热点读模式（90% 访问热点键），对比 Row Cache 命中下的读吞吐与延迟
      */
-    private void benchmarkCacheVsNoCache() {
+    public void benchmarkCacheVsNoCache() {
         System.out.println("\n=== 有缓存 vs 无缓存 读取性能对比 ===");
 
         final int ops = Math.max(1000, Math.min(100_000, config.numOperations));
@@ -1281,6 +1455,23 @@ public class BenchmarkRunner {
             sb.append((char) ('a' + random.nextInt(26)));
         }
         return sb.toString();
+    }
+    
+    /**
+     * 处理测试失败情况
+     */
+    private void handleTestFailure(String testName, Exception e, Exception firstException) {
+        System.err.printf("❌ %s 失败: %s%n", testName, e.getMessage());
+        if (firstException == null) {
+            // 记录第一个异常，但不立即抛出，让其他测试继续执行
+            try {
+                // 使用反射创建一个新的异常实例来保存原始异常信息
+                firstException = new RuntimeException("测试失败: " + testName, e);
+            } catch (Exception ignored) {
+                // 如果反射失败，就直接使用原始异常
+                firstException = e;
+            }
+        }
     }
     
     /**

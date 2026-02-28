@@ -15,7 +15,8 @@
 #   functional|func        - 运行功能测试
 #   performance|perf       - 运行性能测试
 #   cache-benchmark|cache  - 运行缓存对比基准测试
-#   memory|mem            - 运行内存测试
+#   memory, mem           - 运行内存测试
+#   memory-opt, mem-opt, million - 运行内存优化专项测试（百万级数据）
 #   stress                - 运行压力测试
 #   list                  - 列出所有测试会话
 #   show [会话ID]          - 显示指定会话的详细信息
@@ -97,6 +98,8 @@ Java LSM Tree 测试套件
   performance, perf      运行性能测试  
   cache-benchmark, cache 运行缓存对比基准测试
   memory, mem           运行内存测试
+  memory-opt, mem-opt, million
+                       运行内存优化专项测试（百万级数据）
   stress                运行压力测试
   list                  列出所有测试会话
   show [会话ID]          显示指定会话的详细信息
@@ -500,6 +503,9 @@ main() {
             ;;
         "memory"|"mem")
             run_single_test "memory"
+            ;;
+        "memory-opt"|"mem-opt"|"million")
+            run_single_test "memory-opt"
             ;;
         "stress")
             run_single_test "stress"

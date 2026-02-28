@@ -145,11 +145,28 @@ public class NioAsyncIOManager implements AsyncIOManager {
 
     @Override
     public void close() throws IOException {
+        // 先关闭所有 channel，这会取消所有待处理的 I/O 操作
         for (AsynchronousFileChannel ch : channelCache.values()) {
-            try { ch.close(); } catch (IOException ignored) {}
+            try { 
+                ch.close(); 
+            } catch (IOException ignored) {}
         }
         channelCache.clear();
+        
+        // 然后关闭线程池
         ioExecutor.shutdown();
+        try {
+            if (!ioExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                ioExecutor.shutdownNow();
+                // 再等待一小段时间让中断生效
+                if (!ioExecutor.awaitTermination(1, TimeUnit.SECONDS)) {
+                    System.err.println("警告: 部分I/O线程未能在超时内终止");
+                }
+            }
+        } catch (InterruptedException e) {
+            ioExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 
     static final class CompletionHandlerImpl<V> implements java.nio.channels.CompletionHandler<V, Object> {

@@ -522,8 +522,16 @@ public class LSMTree implements AutoCloseable {
         // 关闭WAL
         wal.close();
 
-        // 立即关闭线程池，不等待
+        // 关闭压缩线程池，等待线程终止
         compactionExecutor.shutdownNow();
+        try {
+            if (!compactionExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                // 如果线程未能在超时内终止，记录警告但不阻塞
+                System.err.println("警告: 压缩线程未能在超时内终止");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
 
         MetricsHttpServer.stopIfRunning();
 

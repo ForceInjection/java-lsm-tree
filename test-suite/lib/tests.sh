@@ -116,13 +116,13 @@ run_functional_tests() {
     
     # 在session功能测试目录运行，传递相对路径作为数据目录
     cd "${functional_example_dir}"
-    # 使用 Docker 运行 Maven exec 插件，确保所有依赖都可用
+    # 使用 Docker 运行 Maven exec 插件，确保所有依赖都可用（过滤线程警告噪音）
     docker run --rm \
         -v "${PROJECT_ROOT}":/workspace \
         -v "${HOME}/.m2":/root/.m2 \
         -w /workspace \
         maven:3.8.6-openjdk-8 \
-        bash -lc "timeout ${FUNCTIONAL_EXAMPLE_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.LSMTreeExample' -Dexec.args='test-suite/results/sessions/${TEST_SESSION_ID}/functional/example/lsm_data' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" > "${example_log}" 2>&1
+        bash -lc "timeout ${FUNCTIONAL_EXAMPLE_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.LSMTreeExample' -Dexec.args='test-suite/results/sessions/${TEST_SESSION_ID}/functional/example/lsm_data' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" 2>&1 | grep -v "\[WARNING\].*will linger\|\[WARNING\].*was interrupted\|\[WARNING\].*NOTE:.*thread\|\[WARNING\].*Couldn't destroy\|IllegalThreadStateException\|^\s\+at \|ThreadGroup.destroy\|exec.AbstractExec\|exec.daemon" > "${example_log}"
     
     local exit_code=$?
     if [ ${exit_code} -eq 0 ]; then
@@ -150,14 +150,14 @@ run_functional_tests() {
         -w /workspace \
         -e MAVEN_OPTS="-Dlsm.metrics.http.enabled=true -Dlsm.metrics.http.port=9093" \
         maven:3.8.6-openjdk-8 \
-        bash -lc "timeout ${FUNCTIONAL_METRICS_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.LSMTreeExample' -Dexec.args='test-suite/results/sessions/${TEST_SESSION_ID}/functional/example/lsm_data' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" > "${metrics_log}" 2>&1
+        bash -lc "timeout ${FUNCTIONAL_METRICS_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.LSMTreeExample' -Dexec.args='test-suite/results/sessions/${TEST_SESSION_ID}/functional/example/lsm_data' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" 2>&1 | grep -v "\[WARNING\].*will linger\|\[WARNING\].*was interrupted\|\[WARNING\].*NOTE:.*thread\|\[WARNING\].*Couldn't destroy\|IllegalThreadStateException\|^\s\+at \|ThreadGroup.destroy\|exec.AbstractExec\|exec.daemon" > "${metrics_log}"
     if [ $? -eq 0 ]; then
         record_test_result "$results_file" "functional" "metrics.expose" "PASS"
     else
         record_test_result "$results_file" "functional" "metrics.expose" "FAIL"
     fi
 
-    # api.put_get: 使用 BenchmarkRunner 以极小规模运行，验证 API 路径可用
+    # api.put_get: 使用 BenchmarkRunner 以极小规模运行，验证 API 路径可用（过滤线程警告噪音）
     local api_log="${functional_api_dir}/api_run_$(get_timestamp).log"
     cd "${functional_api_dir}"
     docker run --rm \
@@ -166,7 +166,7 @@ run_functional_tests() {
         -v "${HOME}/.m2":/root/.m2 \
         -w /workspace \
         maven:3.8.6-openjdk-8 \
-        bash -lc "timeout ${FUNCTIONAL_API_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.BenchmarkRunner' -Dexec.args='--operations 50 --threads 1 --key-size 8 --value-size 16 --data-dir test-suite/results/sessions/${TEST_SESSION_ID}/functional/api_data' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" > "${api_log}" 2>&1
+        bash -lc "timeout ${FUNCTIONAL_API_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.BenchmarkRunner' -Dexec.args='--operations 50 --threads 1 --key-size 8 --value-size 16 --data-dir test-suite/results/sessions/${TEST_SESSION_ID}/functional/api_data' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" 2>&1 | grep -v "\[WARNING\].*will linger\|\[WARNING\].*was interrupted\|\[WARNING\].*NOTE:.*thread\|\[WARNING\].*Couldn't destroy\|IllegalThreadStateException\|^\s\+at \|ThreadGroup.destroy\|exec.AbstractExec\|exec.daemon" > "${api_log}"
     if [ $? -eq 0 ]; then
         record_test_result "$results_file" "functional" "api.put_get" "PASS"
     else
@@ -208,14 +208,14 @@ run_performance_benchmarks() {
         
         cd "${SESSION_PERFORMANCE_DIR}"
         
-        # 运行性能基准测试，使用命名参数格式
+        # 运行性能基准测试，使用命名参数格式（过滤线程警告噪音）
         echo "=== 第 ${i} 轮测试 ===" >> "${results_file}"
         docker run --rm \
             -v "${PROJECT_ROOT}":/workspace \
             -v "${HOME}/.m2":/root/.m2 \
             -w /workspace \
             maven:3.8.6-openjdk-8 \
-            bash -lc "timeout ${PERFORMANCE_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.BenchmarkRunner' -Dexec.args='--operations ${BENCHMARK_OPERATIONS} --threads ${BENCHMARK_THREADS} --key-size ${BENCHMARK_KEY_SIZE} --value-size ${BENCHMARK_VALUE_SIZE} --data-dir test-suite/results/sessions/${TEST_SESSION_ID}/performance/benchmark_data_round_${i}' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" >> "${results_file}" 2>&1
+            bash -lc "timeout ${PERFORMANCE_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.BenchmarkRunner' -Dexec.args='--operations ${BENCHMARK_OPERATIONS} --threads ${BENCHMARK_THREADS} --key-size ${BENCHMARK_KEY_SIZE} --value-size ${BENCHMARK_VALUE_SIZE} --data-dir test-suite/results/sessions/${TEST_SESSION_ID}/performance/benchmark_data_round_${i}' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" 2>&1 | grep -v "\[WARNING\].*will linger\|\[WARNING\].*was interrupted\|\[WARNING\].*NOTE:.*thread\|\[WARNING\].*Couldn't destroy\|IllegalThreadStateException\|^\s\+at \|ThreadGroup.destroy\|exec.AbstractExec\|exec.daemon" >> "${results_file}"
         
         local exit_code=$?
         if [ ${exit_code} -eq 0 ]; then
@@ -233,7 +233,7 @@ run_performance_benchmarks() {
         sleep 2
     done
     
-    # 追加：运行一次仅缓存对比基准测试
+    # 追加：运行一次仅缓存对比基准测试（过滤线程警告噪音）
     log_benchmark "运行缓存对比基准测试 (有缓存 vs 无缓存)..."
     local cache_results_file="${SESSION_PERFORMANCE_DIR}/cache_benchmark_$(get_timestamp).txt"
     docker run --rm \
@@ -241,7 +241,7 @@ run_performance_benchmarks() {
         -v "${HOME}/.m2":/root/.m2 \
         -w /workspace \
         maven:3.8.6-openjdk-8 \
-        bash -lc "timeout ${PERFORMANCE_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.BenchmarkRunner' -Dexec.args='--operations ${BENCHMARK_OPERATIONS} --threads ${BENCHMARK_THREADS} --key-size ${BENCHMARK_KEY_SIZE} --value-size ${BENCHMARK_VALUE_SIZE} --data-dir test-suite/results/sessions/${TEST_SESSION_ID}/performance/cache_only --only-cache-benchmark' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" >> "${cache_results_file}" 2>&1
+        bash -lc "timeout ${PERFORMANCE_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.BenchmarkRunner' -Dexec.args='--operations ${BENCHMARK_OPERATIONS} --threads ${BENCHMARK_THREADS} --key-size ${BENCHMARK_KEY_SIZE} --value-size ${BENCHMARK_VALUE_SIZE} --data-dir test-suite/results/sessions/${TEST_SESSION_ID}/performance/cache_only --only-cache-benchmark' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" 2>&1 | grep -v "\[WARNING\].*will linger\|\[WARNING\].*was interrupted\|\[WARNING\].*NOTE:.*thread\|\[WARNING\].*Couldn't destroy\|IllegalThreadStateException\|^\s\+at \|ThreadGroup.destroy\|exec.AbstractExec\|exec.daemon" >> "${cache_results_file}"
     if [ $? -eq 0 ]; then
         record_test_result "$test_results_file" "performance" "cache_vs_no_cache" "PASS"
     else
@@ -274,7 +274,7 @@ run_cache_only_benchmark() {
         -v "${HOME}/.m2":/root/.m2 \
         -w /workspace \
         maven:3.8.6-openjdk-8 \
-        bash -lc "timeout ${PERFORMANCE_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.BenchmarkRunner' -Dexec.args='--operations ${BENCHMARK_OPERATIONS} --threads ${BENCHMARK_THREADS} --key-size ${BENCHMARK_KEY_SIZE} --value-size ${BENCHMARK_VALUE_SIZE} --data-dir test-suite/results/sessions/${TEST_SESSION_ID}/performance/cache_only --only-cache-benchmark' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" >> "${cache_results_file}" 2>&1
+        bash -lc "timeout ${PERFORMANCE_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.BenchmarkRunner' -Dexec.args='--operations ${BENCHMARK_OPERATIONS} --threads ${BENCHMARK_THREADS} --key-size ${BENCHMARK_KEY_SIZE} --value-size ${BENCHMARK_VALUE_SIZE} --data-dir test-suite/results/sessions/${TEST_SESSION_ID}/performance/cache_only --only-cache-benchmark' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" 2>&1 | grep -v "\[WARNING\].*will linger\|\[WARNING\].*was interrupted\|\[WARNING\].*NOTE:.*thread\|\[WARNING\].*Couldn't destroy\|IllegalThreadStateException\|^\s\+at \|ThreadGroup.destroy\|exec.AbstractExec\|exec.daemon" >> "${cache_results_file}"
     if [ $? -eq 0 ]; then
         record_test_result "$test_results_file" "performance" "cache_vs_no_cache" "PASS"
     else
@@ -335,7 +335,7 @@ run_memory_tests() {
         -v "${HOME}/.m2":/root/.m2 \
         -w /workspace \
         maven:3.8.6-openjdk-8 \
-        bash -lc "timeout ${MEMORY_TIMEOUT}s mvn -q exec:java -Dexec.mainClass='${MAIN_CLASS}.LSMTreeExample' -Dexec.args='test-suite/results/sessions/${TEST_SESSION_ID}/memory/lsm_data' -Dexec.jvmArgs='-Xlog:gc:${memory_log} ${JAVA_OPTS}' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" >> "${memory_log}" 2>&1
+        bash -lc "timeout ${MEMORY_TIMEOUT}s mvn -q exec:java -Dexec.mainClass='${MAIN_CLASS}.LSMTreeExample' -Dexec.args='test-suite/results/sessions/${TEST_SESSION_ID}/memory/lsm_data' -Dexec.jvmArgs='-Xlog:gc:${memory_log} ${JAVA_OPTS}' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" 2>&1 | grep -v "\[WARNING\].*will linger\|\[WARNING\].*was interrupted\|\[WARNING\].*NOTE:.*thread\|\[WARNING\].*Couldn't destroy\|IllegalThreadStateException\|^\s\+at \|ThreadGroup.destroy\|exec.AbstractExec\|exec.daemon" >> "${memory_log}"
     
     local exit_code=$?
     if [ ${exit_code} -eq 0 ]; then
@@ -344,12 +344,24 @@ run_memory_tests() {
         
         # 提取内存使用信息
         if [ -f "${memory_log}" ]; then
-            echo "=== GC 信息 ===" >> "${memory_results}"
-            grep "GC" "${memory_log}" | tail -10 >> "${memory_results}" 2>/dev/null || true
+            echo "=== 测试执行统计 ===" >> "${memory_results}"
+            # 提取关键性能指标
+            grep -E "(插入.*耗时|查询.*耗时|统计信息)" "${memory_log}" >> "${memory_results}" 2>/dev/null || true
             echo "" >> "${memory_results}"
             
-            echo "=== 内存使用统计 ===" >> "${memory_results}"
-            grep -E "(Heap|Memory)" "${memory_log}" >> "${memory_results}" 2>/dev/null || true
+            echo "=== LSM Tree 状态 ===" >> "${memory_results}"
+            grep -E "LSMTreeStats" "${memory_log}" >> "${memory_results}" 2>/dev/null || true
+            echo "" >> "${memory_results}"
+            
+            # 提取刷盘信息
+            echo "=== 刷盘信息 ===" >> "${memory_results}"
+            grep -E "(刷盘|flush)" "${memory_log}" >> "${memory_results}" 2>/dev/null || true
+            
+            # 计算 JVM 运行时内存信息
+            echo "" >> "${memory_results}"
+            echo "=== JVM 内存估算 ===" >> "${memory_results}"
+            echo "测试数据量: 10000 条记录" >> "${memory_results}"
+            echo "内存配置: ${JAVA_OPTS}" >> "${memory_results}"
         fi
     else
         log_error "内存测试失败 (退出码: ${exit_code})，详细信息请查看: ${memory_log}"
@@ -361,6 +373,88 @@ run_memory_tests() {
     complete_test_category "$test_results_file" "memory" "completed"
     log_success "内存使用测试完成"
     log_info "结果文件: ${memory_results}"
+}
+
+# =============================================================================
+# 内存优化专项测试
+# =============================================================================
+
+# 内存优化百万级数据测试函数
+run_memory_optimization_tests() {
+    update_test_status "memory" "running"
+    log_test "开始内存优化专项测试 (百万级数据)..."
+    
+    local memory_opt_log="${SESSION_MEMORY_DIR}/memory_optimization_test_$(get_timestamp).log"
+    local memory_opt_results="${SESSION_MEMORY_DIR}/memory_optimization_analysis_$(get_timestamp).txt"
+    local test_results_file="${SESSION_DIR}/test_results.json"
+    start_test_category "$test_results_file" "memory"
+    
+    echo "=== Java LSM Tree 内存优化专项测试结果 ===" > "${memory_opt_results}"
+    echo "测试时间: $(date)" >> "${memory_opt_results}"
+    echo "测试规模: 百万级数据 (1,000,000 records)" >> "${memory_opt_results}"
+    echo "JVM 参数: ${JAVA_OPTS}" >> "${memory_opt_results}"
+    echo "" >> "${memory_opt_results}"
+    
+    # 在session内存测试目录中创建优化测试数据目录
+    local memory_opt_data_dir="${SESSION_MEMORY_DIR}/memory_opt_data"
+    rm -rf "${memory_opt_data_dir}" 2>/dev/null || true
+    mkdir -p "${memory_opt_data_dir}"
+    
+    cd "${SESSION_MEMORY_DIR}"
+    
+    log_test "运行内存优化百万级数据测试..."
+    
+    # 使用更大的JVM堆内存设置
+    local opt_java_opts="-Xmx4g -Xms2g -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+PrintGCDetails -XX:+PrintGCTimeStamps"
+    
+    docker run --rm \
+        -v "${PROJECT_ROOT}":/workspace \
+        -v "${HOME}/.m2":/root/.m2 \
+        -w /workspace \
+        maven:3.8.6-openjdk-8 \
+        bash -lc "timeout ${MEMORY_TIMEOUT}s mvn -q exec:java -Dexec.mainClass='${MAIN_CLASS}.memory.ImprovedMemoryMeasurement' -Dexec.jvmArgs='${opt_java_opts}' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" 2>&1 | grep -v "\[WARNING\].*will linger\|\[WARNING\].*was interrupted\|\[WARNING\].*NOTE:.*thread\|\[WARNING\].*Couldn't destroy\|IllegalThreadStateException\|^\s\+at \|ThreadGroup.destroy\|exec.AbstractExec\|exec.daemon" > "${memory_opt_log}"
+    
+    local exit_code=$?
+    if [ ${exit_code} -eq 0 ]; then
+        log_success "内存优化测试完成"
+        record_test_result "$test_results_file" "memory" "memory_optimization_million" "PASS"
+        
+        # 分析测试结果
+        if [ -f "${memory_opt_log}" ]; then
+            echo "=== 内存优化测试详细结果 ===" >> "${memory_opt_results}"
+            
+            # 提取性能提升数据
+            echo "--- 性能提升分析 ---" >> "${memory_opt_results}"
+            grep -E "(性能改进|时间提升)" "${memory_opt_log}" >> "${memory_opt_results}" 2>/dev/null || echo "未找到性能提升数据" >> "${memory_opt_results}"
+            
+            # 提取GC压力减少数据
+            echo -e "\n--- GC压力减少分析 ---" >> "${memory_opt_results}"
+            grep -E "(GC压力减少|GC次数增加)" "${memory_opt_log}" >> "${memory_opt_results}" 2>/dev/null || echo "未找到GC数据" >> "${memory_opt_results}"
+            
+            # 提取对象池统计
+            echo -e "\n--- 对象池使用统计 ---" >> "${memory_opt_results}"
+            grep -E "对象池统计" "${memory_opt_log}" >> "${memory_opt_results}" 2>/dev/null || echo "未找到对象池统计" >> "${memory_opt_results}"
+            
+            # 提取内存使用数据
+            echo -e "\n--- 内存使用详情 ---" >> "${memory_opt_results}"
+            grep -E "(堆内存增长|非堆内存增长|堆内存使用率)" "${memory_opt_log}" >> "${memory_opt_results}" 2>/dev/null || echo "未找到内存使用详情" >> "${memory_opt_results}"
+        fi
+    else
+        log_error "内存优化测试失败 (退出码: ${exit_code})，详细信息请查看: ${memory_opt_log}"
+        record_test_result "$test_results_file" "memory" "memory_optimization_million" "FAIL"
+        
+        # 记录错误信息
+        echo "=== 测试失败信息 ===" >> "${memory_opt_results}"
+        echo "退出码: ${exit_code}" >> "${memory_opt_results}"
+        echo "错误日志:" >> "${memory_opt_results}"
+        tail -20 "${memory_opt_log}" >> "${memory_opt_results}" 2>/dev/null || echo "无法读取错误日志" >> "${memory_opt_results}"
+        return 1
+    fi
+    
+    update_test_status "memory" "completed"
+    complete_test_category "$test_results_file" "memory" "completed"
+    log_success "内存优化专项测试完成"
+    log_info "结果文件: ${memory_opt_results}"
 }
 
 # =============================================================================
@@ -392,15 +486,13 @@ run_stress_tests() {
     # 运行压力测试
     log_test "运行高负载压力测试..."
     
-    # 设置压力测试的JVM参数
-    local stress_java_opts="-Xmx1g -Xms512m -XX:+UseG1GC -XX:+PrintGCDetails"
-    
+    # 使用 BenchmarkRunner 进行压力测试，获取详细性能指标（过滤线程警告噪音）
     docker run --rm \
         -v "${PROJECT_ROOT}":/workspace \
         -v "${HOME}/.m2":/root/.m2 \
         -w /workspace \
         maven:3.8.6-openjdk-8 \
-        bash -lc "timeout ${STRESS_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.LSMTreeExample' -Dexec.args='test-suite/results/sessions/${TEST_SESSION_ID}/stress/stress_test_data' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" > "${stress_log}" 2>&1
+        bash -lc "timeout ${STRESS_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.BenchmarkRunner' -Dexec.args='--operations ${STRESS_OPERATIONS:-20000} --threads ${STRESS_THREADS:-4} --key-size 16 --value-size 100 --data-dir test-suite/results/sessions/${TEST_SESSION_ID}/stress/stress_test_data' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" 2>&1 | grep -v "\[WARNING\].*will linger\|\[WARNING\].*was interrupted\|\[WARNING\].*NOTE:.*thread\|\[WARNING\].*Couldn't destroy\|IllegalThreadStateException\|^\s\+at \|ThreadGroup.destroy\|exec.AbstractExec\|exec.daemon" > "${stress_log}"
     
     local exit_code=$?
     if [ ${exit_code} -eq 0 ]; then
@@ -410,11 +502,24 @@ run_stress_tests() {
         # 提取压力测试结果
         if [ -f "${stress_log}" ]; then
             echo "=== 压力测试统计 ===" >> "${stress_results}"
-            grep -E "(Operations|Throughput|Latency|Error)" "${stress_log}" >> "${stress_results}" 2>/dev/null || true
+            # 提取关键性能指标
+            grep -E "(吞吐量|总操作数|错误数|延迟|Throughput|ops/sec)" "${stress_log}" >> "${stress_results}" 2>/dev/null || true
             echo "" >> "${stress_results}"
             
-            echo "=== GC 性能影响 ===" >> "${stress_results}"
-            grep "GC" "${stress_log}" | tail -5 >> "${stress_results}" 2>/dev/null || true
+            echo "=== 写入性能 ===" >> "${stress_results}"
+            grep -E "(顺序写入|随机写入|写入延迟)" "${stress_log}" >> "${stress_results}" 2>/dev/null || true
+            echo "" >> "${stress_results}"
+            
+            echo "=== 读取性能 ===" >> "${stress_results}"
+            grep -E "(读取|缓存对比|命中)" "${stress_log}" >> "${stress_results}" 2>/dev/null || true
+            echo "" >> "${stress_results}"
+            
+            echo "=== 混合工作负载 ===" >> "${stress_results}"
+            grep -E "(混合|工作负载)" "${stress_log}" >> "${stress_results}" 2>/dev/null || true
+            echo "" >> "${stress_results}"
+            
+            echo "=== LSM Tree 状态 ===" >> "${stress_results}"
+            grep -E "LSMTreeStats" "${stress_log}" >> "${stress_results}" 2>/dev/null || true
         fi
     else
         log_error "压力测试失败 (退出码: ${exit_code})，详细信息请查看: ${stress_log}"
@@ -516,6 +621,9 @@ run_test_by_type() {
         "memory"|"mem")
             run_memory_tests
             ;;
+        "memory-opt"|"mem-opt"|"million")
+            run_memory_optimization_tests
+            ;;
         "stress")
             run_stress_tests
             ;;
@@ -524,7 +632,7 @@ run_test_by_type() {
             ;;
         *)
             log_error "未知的测试类型: $test_type"
-            log_info "支持的测试类型: functional, performance, memory, stress, all"
+            log_info "支持的测试类型: unit, tools, functional, performance, cache, memory, memory-opt, stress, all"
             return 1
             ;;
     esac

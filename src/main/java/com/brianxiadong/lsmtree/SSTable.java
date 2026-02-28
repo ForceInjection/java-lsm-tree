@@ -4,7 +4,6 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
 
 /**
  * Sorted String Table (SSTable) 实现
@@ -62,6 +61,7 @@ public class SSTable {
 
     /**
      * 将排序数据写入文件
+     * 使用同步 I/O 避免创建额外的异步线程
      */
     private void writeToFile(List<KeyValue> sortedData) throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -78,24 +78,11 @@ public class SSTable {
             }
         }
         byte[] payload = baos.toByteArray();
-        try {
-            AsyncIOManager io = AsyncIO.get();
-            CompletableFuture<Void> f = io.writeAsync(filePath, 0, payload)
-                    .thenCompose(v -> {
-                        try {
-                            return io.syncAsync(filePath);
-                        } catch (IOException e) {
-                            CompletableFuture<Void> cf = new CompletableFuture<>();
-                            cf.completeExceptionally(e);
-                            return cf;
-                        }
-                    });
-            f.join();
-        } catch (RuntimeException e) {
-            Throwable c = e.getCause();
-            if (c instanceof IOException)
-                throw (IOException) c;
-            throw e;
+        // 使用同步 I/O 写入，避免 AsynchronousFileChannel 创建额外线程
+        try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(filePath, "rw");
+             java.nio.channels.FileChannel fc = raf.getChannel()) {
+            fc.write(java.nio.ByteBuffer.wrap(payload));
+            fc.force(true); // 确保数据刷新到磁盘
         }
     }
 
@@ -128,24 +115,11 @@ public class SSTable {
             out.write(compressed);
         }
         byte[] all = bos.toByteArray();
-        try {
-            AsyncIOManager io = AsyncIO.get();
-            CompletableFuture<Void> f = io.writeAsync(filePath, 0, all)
-                    .thenCompose(v -> {
-                        try {
-                            return io.syncAsync(filePath);
-                        } catch (IOException e) {
-                            CompletableFuture<Void> cf = new CompletableFuture<>();
-                            cf.completeExceptionally(e);
-                            return cf;
-                        }
-                    });
-            f.join();
-        } catch (RuntimeException e) {
-            Throwable c = e.getCause();
-            if (c instanceof IOException)
-                throw (IOException) c;
-            throw e;
+        // 使用同步 I/O 写入，避免 AsynchronousFileChannel 创建额外线程
+        try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(filePath, "rw");
+             java.nio.channels.FileChannel fc = raf.getChannel()) {
+            fc.write(java.nio.ByteBuffer.wrap(all));
+            fc.force(true); // 确保数据刷新到磁盘
         }
     }
 

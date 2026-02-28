@@ -2,20 +2,22 @@ package com.brianxiadong.lsmtree;
 
 import java.io.*;
 import java.nio.ByteBuffer;
-import java.nio.channels.AsynchronousFileChannel;
+import java.nio.channels.FileChannel;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 
+/**
+ * Write-Ahead Log 实现
+ * 使用同步 I/O 避免创建额外的异步线程
+ */
 public class WriteAheadLog {
     private final String filePath;
-    private AsynchronousFileChannel channel;
+    private FileChannel channel;
     private final Object lock = new Object();
     private final AtomicLong position = new AtomicLong(0L);
-    private final List<CompletableFuture<Void>> pendingWrites = new ArrayList<>();
     private final int syncBatchSize;
     private final long syncIntervalMillis;
     private long lastSyncTimeMillis;
@@ -32,8 +34,9 @@ public class WriteAheadLog {
         File file = new File(filePath);
         long initial = file.exists() ? file.length() : 0L;
         this.position.set(initial);
-        this.channel = AsynchronousFileChannel.open(Paths.get(filePath), StandardOpenOption.WRITE,
-                StandardOpenOption.READ, StandardOpenOption.CREATE);
+        // 使用同步 FileChannel 替代 AsynchronousFileChannel
+        this.channel = FileChannel.open(Paths.get(filePath), 
+                StandardOpenOption.WRITE, StandardOpenOption.READ, StandardOpenOption.CREATE);
     }
 
     public void append(LogEntry entry) throws IOException {
@@ -41,46 +44,28 @@ public class WriteAheadLog {
             byte[] bytes = (entry.toString() + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8);
             ByteBuffer buf = ByteBuffer.wrap(bytes);
             long pos = position.getAndAdd(bytes.length);
-            CompletableFuture<Void> cf = new CompletableFuture<>();
-            channel.write(buf, pos, null, new NioAsyncIOManager.CompletionHandlerImpl<>(written -> cf.complete(null),
-                    ex -> cf.completeExceptionally(ex)));
-            pendingWrites.add(cf);
+            // 使用同步写入
+            channel.write(buf, pos);
 
-            boolean needSyncByBatch = pendingWrites.size() >= syncBatchSize;
+            boolean needSyncByBatch = position.get() % syncBatchSize == 0;
             boolean needSyncByTime = syncIntervalMillis > 0 && (System.currentTimeMillis() - lastSyncTimeMillis) >= syncIntervalMillis;
 
             if (needSyncByBatch || needSyncByTime) {
-                try {
-                    CompletableFuture.allOf(pendingWrites.toArray(new CompletableFuture[0])).join();
-                    AsyncIO.get().syncAsync(filePath).join();
-                    pendingWrites.clear();
-                    lastSyncTimeMillis = System.currentTimeMillis();
-                } catch (RuntimeException e) {
-                    Throwable c = e.getCause();
-                    if (c instanceof IOException)
-                        throw (IOException) c;
-                    throw e;
-                }
+                channel.force(false);
+                lastSyncTimeMillis = System.currentTimeMillis();
             }
         }
     }
 
     public void checkpoint() throws IOException {
         synchronized (lock) {
-            if (channel != null)
+            if (channel != null && channel.isOpen())
                 channel.close();
-            if (!pendingWrites.isEmpty()) {
-                try {
-                    CompletableFuture.allOf(pendingWrites.toArray(new CompletableFuture[0])).join();
-                    AsyncIO.get().syncAsync(filePath).join();
-                } catch (RuntimeException ignored) {}
-                pendingWrites.clear();
-            }
             File file = new File(filePath);
             if (file.exists())
                 file.delete();
-            this.channel = AsynchronousFileChannel.open(Paths.get(filePath), StandardOpenOption.WRITE,
-                    StandardOpenOption.READ, StandardOpenOption.CREATE);
+            this.channel = FileChannel.open(Paths.get(filePath), 
+                    StandardOpenOption.WRITE, StandardOpenOption.READ, StandardOpenOption.CREATE);
             this.position.set(0L);
             this.lastSyncTimeMillis = System.currentTimeMillis();
         }
@@ -104,15 +89,11 @@ public class WriteAheadLog {
 
     public void close() throws IOException {
         synchronized (lock) {
-            if (!pendingWrites.isEmpty()) {
-                try {
-                    CompletableFuture.allOf(pendingWrites.toArray(new CompletableFuture[0])).join();
-                    AsyncIO.get().syncAsync(filePath).join();
-                } catch (RuntimeException ignored) {}
-                pendingWrites.clear();
-            }
-            if (channel != null)
+            // 强制刷新未写入的数据
+            if (channel != null && channel.isOpen()) {
+                channel.force(true);
                 channel.close();
+            }
         }
     }
 
