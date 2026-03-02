@@ -554,7 +554,7 @@ public interface AsyncIOManager {
 
 #### 4.3.1 任务描述
 
-优化内存使用，减少 GC 压力，提高系统稳定性。重点关注堆外内存（Off-heap）的管理。
+优化内存使用，减少 GC 压力，提高系统稳定性。重点关注堆外内存（Off-heap）的管理和对象复用。
 
 > **技术方案文档**：[T8 内存优化技术方案与指南](../docs/memory-optimization-guide.md)
 > 本文档提供了 T8 的详细实施指南，包含：
@@ -567,11 +567,11 @@ public interface AsyncIOManager {
 
 #### 4.3.2 技术要求
 
-- 实现对象池减少内存分配
-- 优化大对象处理
-- 实现内存使用监控
-- 支持堆外内存使用
-- 优化 GC 参数配置
+- **OptimizedMemTable 实现**：开发支持对象池复用的 MemTable，减少 KeyValue 对象的频繁创建与销毁。
+- **可变 KeyValue 设计**：改造 KeyValue 类或引入 MutableKeyValue，使其支持重置（reset）和复用。
+- **对象池集成**：集成 Commons Pool 或自定义轻量级对象池，管理高频对象（KeyValue, StringBuilder）。
+- **生命周期管理**：实现 Flush 后的对象归还机制，确保对象能安全回到池中。
+- **堆外内存支持**：针对大对象（如 Block Cache）使用 DirectByteBuffer，减少堆内存占用。
 
 #### 4.3.3 核心实现
 
@@ -579,8 +579,13 @@ public interface AsyncIOManager {
 public interface MemoryManager {
     ByteBuffer allocate(int size, boolean direct);
     void deallocate(ByteBuffer buffer);
+    <T> ObjectPool<T> getObjectPool(Class<T> type);
     MemoryUsageStats getMemoryStats();
-    void triggerGC();
+}
+
+public interface ObjectPool<T> {
+    T borrowObject();
+    void returnObject(T obj);
 }
 ```
 
@@ -588,6 +593,7 @@ public interface MemoryManager {
 
 - [ ] GC 暂停时间减少 > 30%（基于 G1GC，堆内存 8GB，相比默认配置）
 - [ ] 内存使用效率提升 > 20%（通过对象池和内存复用，相比朴素实现）
+- [ ] OptimizedMemTable 在高并发写入场景下，对象创建速率减少 > 80%
 - [ ] 支持大内存场景（> 32GB），GC 暂停时间 < 100ms
 - [ ] 提供详细的内存使用报告和 GC 分析
 
