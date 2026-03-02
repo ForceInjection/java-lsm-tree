@@ -77,7 +77,7 @@ run_tools_tests() {
         -v "${HOME}/.m2":/root/.m2 \
         -w /workspace \
         maven:3.8.6-openjdk-8 \
-        mvn -q "-Dtest=com.brianxiadong.lsmtree.tools.*" -DfailIfNoTests=false test > "${logf}" 2>&1
+        mvn -q "-Dtest=com.brianxiadong.lsmtree.tools.**" -DfailIfNoTests=false test > "${logf}" 2>&1
     local ec=$?
     if [ ${ec} -eq 0 ]; then
         record_test_result "$results_file" "tools" "maven_tools" "PASS"

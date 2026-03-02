@@ -25,22 +25,29 @@ SESSION_REPORTS_DIR=""
 # Session 管理 API
 # =============================================================================
 
+# 设置会话变量
+set_session_variables() {
+    local session_id="$1"
+    
+    export TEST_SESSION_ID="$session_id"
+    export SESSION_DIR="${RESULTS_DIR}/sessions/${TEST_SESSION_ID}"
+    export SESSION_FUNCTIONAL_DIR="${SESSION_DIR}/functional"
+    export SESSION_PERFORMANCE_DIR="${SESSION_DIR}/performance"
+    export SESSION_MEMORY_DIR="${SESSION_DIR}/memory"
+    export SESSION_STRESS_DIR="${SESSION_DIR}/stress"
+    export SESSION_UNIT_DIR="${SESSION_DIR}/unit"
+    export SESSION_TOOLS_DIR="${SESSION_DIR}/tools"
+    export SESSION_REPORTS_DIR="${SESSION_DIR}/reports"
+}
+
 # 创建新的测试会话
 create_session() {
     local session_id="${1:-$(get_timestamp)}"
     
     log_info "创建新的测试会话: ${session_id}"
     
-    # 设置会话变量
-    TEST_SESSION_ID="$session_id"
-    SESSION_DIR="${RESULTS_DIR}/sessions/${TEST_SESSION_ID}"
-    SESSION_FUNCTIONAL_DIR="${SESSION_DIR}/functional"
-    SESSION_PERFORMANCE_DIR="${SESSION_DIR}/performance"
-    SESSION_MEMORY_DIR="${SESSION_DIR}/memory"
-    SESSION_STRESS_DIR="${SESSION_DIR}/stress"
-    SESSION_UNIT_DIR="${SESSION_DIR}/unit"
-    SESSION_TOOLS_DIR="${SESSION_DIR}/tools"
-    SESSION_REPORTS_DIR="${SESSION_DIR}/reports"
+    # 设置并导出环境变量
+    set_session_variables "$session_id"
     
     # 检查会话是否已存在
     if [[ -d "$SESSION_DIR" ]]; then
@@ -599,32 +606,24 @@ can_reuse_session() {
 # 智能session管理 - 检查并询问用户
 smart_session_management() {
     local test_type="$1"
+
+    # 检查是否有可复用的session
+    if ! has_incomplete_session; then
+        create_session
+        return 0
+    fi
     
-    # 检查是否存在未完成的session
-    if has_incomplete_session; then
-        # 询问用户选择
-        if ask_user_session_choice "$EXISTING_SESSION_ID" "$test_type"; then
-            # 用户选择复用现有session
-            TEST_SESSION_ID="$EXISTING_SESSION_ID"
-            set_session_variables_from_id "$TEST_SESSION_ID"
-            
-            # 确保必要的目录存在
-            mkdir -p "${SESSION_FUNCTIONAL_DIR}"
-            mkdir -p "${SESSION_PERFORMANCE_DIR}"
-            mkdir -p "${SESSION_MEMORY_DIR}"
-            mkdir -p "${SESSION_STRESS_DIR}"
-            mkdir -p "${SESSION_REPORTS_DIR}"
-            
-            log_success "已设置为复用现有会话: ${TEST_SESSION_ID}"
-            return 0
-        else
-            # 用户选择创建新session
-            log_info "将创建新的测试会话..."
-            return 1
-        fi
+    # 获取可复用session的ID
+    local existing_session_id="$EXISTING_SESSION_ID"
+    
+    # 询问用户是否复用
+    if ask_user_session_choice "$existing_session_id" "$test_type"; then
+        # 复用现有session
+        set_session_variables "$existing_session_id"
+        log_success "复用现有测试会话: ${existing_session_id}"
     else
-        # 没有未完成的session，直接创建新的
-        return 1
+        # 创建新session
+        create_session
     fi
 }
 
