@@ -44,6 +44,14 @@ public class KeyValue implements Comparable<KeyValue> {
         return deleted;
     }
 
+    /**
+     * 比较两个键值对
+     * 排序规则：
+     * 1. 键 (Key) 按字典序升序排列
+     * 2. 如果键相同，时间戳 (Timestamp) 按降序排列（最新的在前）
+     * <p>
+     * 这种排序方式便于在合并时快速找到每个键的最新版本。
+     */
     @Override
     public int compareTo(KeyValue other) {
         int keyCompare = this.key.compareTo(other.key);

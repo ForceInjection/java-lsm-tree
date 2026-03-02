@@ -64,5 +64,27 @@ public class SSTableRangeTest {
         log.assertSuccess("空SSTable返回空结果");
         log.pass();
     }
-}
 
+    @Test
+    public void testEmptySSTableGetReturnsNull() throws IOException {
+        TestLogger log = new TestLogger("空SSTable读取测试");
+        log.start("测试空SSTable的单点查询返回null");
+
+        String dir = Files.createTempDirectory("sst-get-empty").toFile().getAbsolutePath();
+        String file = dir + "/sstable_level0_" + System.currentTimeMillis() + ".db";
+        log.data("临时目录", dir);
+
+        log.step("创建空SSTable");
+        List<KeyValue> data = new ArrayList<>();
+        SSTable t = new SSTable(file, data);
+        log.data("数据条目数", 0);
+
+        log.step("查询不存在的key");
+        String value = t.get("missing_key");
+        log.data("返回值", value);
+
+        Assert.assertNull(value);
+        log.assertSuccess("空SSTable查询返回null");
+        log.pass();
+    }
+}

@@ -7,6 +7,16 @@ import java.util.function.Supplier;
 
 /**
  * 通用对象池实现
+ * <p>
+ * 基于 {@link ConcurrentLinkedQueue} 实现的高性能无锁对象池。
+ * 支持：
+ * <ul>
+ *   <li>自定义对象工厂</li>
+ *   <li>最大/最小空闲对象控制</li>
+ *   <li>定期空闲对象回收 (Eviction)</li>
+ *   <li>对象有效性验证</li>
+ * </ul>
+ * 
  * @param <T> 对象类型
  */
 public class GenericObjectPool<T> implements ObjectPool<T> {
@@ -186,6 +196,30 @@ public class GenericObjectPool<T> implements ObjectPool<T> {
     }
     
     /**
+     * 清理空闲对象
+     * 移除超过 maxIdle 的多余对象，以及验证失败的对象。
+     */
+    private void evictIdleObjects() {
+        int currentSize = pool.size();
+        if (currentSize <= minIdle) {
+            return;
+        }
+        
+        // 尝试移除多余的空闲对象，保留 minIdle 个
+        int toRemove = currentSize - minIdle;
+        for (int i = 0; i < toRemove; i++) {
+            T obj = pool.poll();
+            if (obj != null) {
+                destroyObject(obj);
+                destroyedCount.incrementAndGet();
+                idleCount.decrementAndGet();
+            } else {
+                break;
+            }
+        }
+    }
+
+    /**
      * 启动回收任务
      */
     private void startEvictionTask() {
@@ -196,38 +230,6 @@ public class GenericObjectPool<T> implements ObjectPool<T> {
                 evictionRunIntervalMs,
                 java.util.concurrent.TimeUnit.MILLISECONDS
             );
-        }
-    }
-    
-    /**
-     * 回收空闲对象
-     */
-    private void evictIdleObjects() {
-        try {
-            int currentIdle = idleCount.get();
-            if (currentIdle > maxIdle) {
-                // 回收多余的空闲对象
-                int excess = currentIdle - maxIdle;
-                for (int i = 0; i < excess && !pool.isEmpty(); i++) {
-                    T obj = pool.poll();
-                    if (obj != null) {
-                        destroyObject(obj);
-                        destroyedCount.incrementAndGet();
-                        idleCount.decrementAndGet();
-                    }
-                }
-            } else if (currentIdle < minIdle) {
-                // 补充空闲对象到最小值
-                int deficit = minIdle - currentIdle;
-                for (int i = 0; i < deficit && pool.size() < maxIdle; i++) {
-                    T obj = createObject();
-                    pool.offer(obj);
-                    idleCount.incrementAndGet();
-                    createdCount.incrementAndGet();
-                }
-            }
-        } catch (Exception e) {
-            System.err.println("对象池回收任务异常: " + e.getMessage());
         }
     }
     

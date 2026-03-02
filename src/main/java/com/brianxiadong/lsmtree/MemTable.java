@@ -23,8 +23,11 @@ public class MemTable {
      * 插入键值对
      */
     public void put(String key, String value) {
-        KeyValue kv = new KeyValue(key, value);
-        KeyValue oldValue = data.put(key, kv);
+        put(new KeyValue(key, value));
+    }
+
+    public void put(KeyValue kv) {
+        KeyValue oldValue = data.put(kv.getKey(), kv);
         if (oldValue == null) {
             currentSize++;
         }

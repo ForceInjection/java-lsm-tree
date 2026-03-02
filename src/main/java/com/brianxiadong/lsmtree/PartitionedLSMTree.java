@@ -6,6 +6,12 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.PriorityQueue;
 
+/**
+ * 分区 LSM Tree 实现
+ * <p>
+ * 通过 PartitionStrategy 将数据分散到多个独立的 LSM Tree 实例（分片）中。
+ * 这可以提高并发写入性能（减少锁竞争）并支持更大的数据集（分散文件 I/O）。
+ */
 public class PartitionedLSMTree implements AutoCloseable, RangeQuery {
     private final List<LSMTree> shards;
     private final PartitionStrategy strategy;
@@ -42,10 +48,18 @@ public class PartitionedLSMTree implements AutoCloseable, RangeQuery {
         return shards.get(p).get(key);
     }
 
+    /**
+     * 执行范围查询
+     * <p>
+     * 注意：当前实现会将所有涉及分区的查询结果加载到内存中进行归并，
+     * 对于大数据量的范围查询，可能会导致 OOM。
+     * 生产环境建议使用流式归并（Merge Iterator）。
+     */
     @Override
     public Iterator<KeyValue> range(String startKey, String endKey, boolean includeStart, boolean includeEnd) throws IOException {
         List<Integer> parts = strategy.getPartitionsForRange(startKey, endKey, shards.size());
         List<List<KeyValue>> sources = new ArrayList<>();
+        // 警告：这里将所有分区的查询结果加载到内存
         for (Integer p : parts) {
             Iterator<KeyValue> it = shards.get(p).range(startKey, endKey, includeStart, includeEnd);
             List<KeyValue> list = new ArrayList<>();

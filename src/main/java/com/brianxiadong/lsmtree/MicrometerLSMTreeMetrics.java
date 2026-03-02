@@ -7,6 +7,12 @@ import io.micrometer.core.instrument.Timer;
 
 import java.util.concurrent.TimeUnit;
 
+/**
+ * 基于 Micrometer 的 LSM Tree 指标实现
+ * <p>
+ * 使用 Micrometer 记录写延迟、读延迟、压缩数据量、刷盘延迟等关键指标。
+ * 支持集成到 Prometheus 等监控系统。
+ */
 public class MicrometerLSMTreeMetrics implements LSMTreeMetrics {
     private final Timer writeTimer;
     private final Timer readTimer;

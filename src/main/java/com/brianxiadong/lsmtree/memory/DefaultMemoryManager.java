@@ -7,6 +7,10 @@ import java.util.Map;
 
 /**
  * 内存管理器默认实现
+ * <p>
+ * 整合了 {@link DirectMemoryManager} 和 {@link GenericObjectPool}，
+ * 提供基于开关的内存优化策略。
+ * 线程安全。
  */
 public class DefaultMemoryManager implements MemoryManager {
     

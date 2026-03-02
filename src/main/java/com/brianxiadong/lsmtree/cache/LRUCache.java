@@ -4,6 +4,13 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
 
+/**
+ * LRU (Least Recently Used) 缓存实现
+ * <p>
+ * 基于 LinkedHashMap 实现，最近最少使用的元素会在容量已满时被驱逐。
+ * 支持 TTL (Time To Live) 过期机制。
+ * 线程安全。
+ */
 public class LRUCache<K,V> implements InternalCache<K,V> {
     private final ReentrantLock lock = new ReentrantLock();
     private volatile int capacity;

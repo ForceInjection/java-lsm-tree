@@ -31,6 +31,8 @@ public class SSTable {
 
     /**
      * 从文件路径加载已存在的SSTable
+     * 注意：这里会重新构建布隆过滤器，需要读取整个文件，对于大文件可能耗时较长。
+     * 优化方案：将布隆过滤器序列化存储在 SSTable 文件头或尾部。
      */
     public SSTable(String filePath) throws IOException {
         this.filePath = filePath;
@@ -173,6 +175,8 @@ public class SSTable {
 
     /**
      * 查询键值 - 简化实现，顺序搜索
+     * 注意：这是一个 O(N) 的操作，虽然有布隆过滤器优化，但对于大文件仍然较慢。
+     * 生产环境通常会使用稀疏索引 (Sparse Index) 来加速查找，将复杂度降低到 O(log N) 或 O(1) (block seek)。
      */
     public String get(String key) {
         // 首先检查布隆过滤器
@@ -258,6 +262,10 @@ public class SSTable {
         }
 
         return entries;
+    }
+
+    public List<KeyValue> range(String startKey, String endKey) throws IOException {
+        return getRangeEntries(startKey, endKey, true, false);
     }
 
     public List<KeyValue> getRangeEntries(String startKey, String endKey, boolean includeStart, boolean includeEnd)

@@ -151,6 +151,10 @@ build_project() {
 # 运行测试函数
 run_tests() {
     log_info "运行项目测试..."
+    
+    # 确保日志目录存在
+    mkdir -p "${BUILD_DIR}/logs"
+    
     docker run --rm \
         --name ${CONTAINER_NAME}-test \
         -v "${PROJECT_ROOT}":/workspace \

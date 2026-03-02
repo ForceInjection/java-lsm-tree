@@ -32,6 +32,7 @@ public class SSTableAnalyzerTest {
         for (int i = 0; i < 5; i++) {
             entries.add(new KeyValue("k" + i, "v" + i));
         }
+        // SSTable 构造函数要求 entries 按 Key 排序
         entries.sort(KeyValue::compareTo);
         new SSTable(sstable.getAbsolutePath(), entries);
         log.data("数据条数", entries.size());

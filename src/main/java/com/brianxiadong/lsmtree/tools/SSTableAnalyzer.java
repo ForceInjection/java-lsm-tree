@@ -10,7 +10,13 @@ import java.util.*;
 
 /**
  * SSTable 文件分析工具
- * 用于分析和调试 LSM Tree 的磁盘文件
+ * <p>
+ * 提供对 SSTable 文件的底层分析能力，包括：
+ * <ul>
+ *   <li>解析文件头和数据条目</li>
+ *   <li>验证数据完整性和有序性</li>
+ *   <li>统计活跃/删除条目、压缩比等指标</li>
+ * </ul>
  */
 public class SSTableAnalyzer {
     
@@ -183,6 +189,116 @@ public class SSTableAnalyzer {
     }
     
     /**
+     * 格式化文件大小
+     */
+    private static String formatFileSize(long size) {
+        if (size < 1024) return size + " B";
+        if (size < 1024 * 1024) return String.format("%.2f KB", size / 1024.0);
+        return String.format("%.2f MB", size / (1024.0 * 1024.0));
+    }
+    
+    /**
+     * 格式化时间戳
+     */
+    private static String formatTimestamp(long timestamp) {
+        return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date(timestamp));
+    }
+    
+    /**
+     * 比较两个SSTable文件
+     */
+    public static void compareFiles(String file1, String file2) {
+        System.out.println("比较文件:");
+        System.out.println("1: " + file1);
+        System.out.println("2: " + file2);
+        
+        AnalysisResult res1 = analyzeFile(file1);
+        AnalysisResult res2 = analyzeFile(file2);
+        
+        if (!res1.isValid()) {
+            System.out.println("文件1无效: " + res1.getErrorMessage());
+            return;
+        }
+        
+        if (!res2.isValid()) {
+            System.out.println("文件2无效: " + res2.getErrorMessage());
+            return;
+        }
+        
+        // 比较基本信息
+        System.out.println("\n=== 基本信息比较 ===");
+        System.out.printf("%-15s %-20s %-20s%n", "指标", "文件1", "文件2");
+        System.out.println("---------------------------------------------------------");
+        System.out.printf("%-15s %-20s %-20s%n", "大小", formatFileSize(res1.getFileSize()), formatFileSize(res2.getFileSize()));
+        System.out.printf("%-15s %-20d %-20d%n", "总条目", res1.getEntryCount(), res2.getEntryCount());
+        System.out.printf("%-15s %-20d %-20d%n", "活跃条目", res1.getActiveCount(), res2.getActiveCount());
+        System.out.printf("%-15s %-20d %-20d%n", "删除条目", res1.getDeletedCount(), res2.getDeletedCount());
+        
+        // 比较内容差异
+        System.out.println("\n=== 内容差异 ===");
+        Set<String> keys1 = new HashSet<>();
+        res1.getEntries().forEach(kv -> keys1.add(kv.getKey()));
+        
+        Set<String> keys2 = new HashSet<>();
+        res2.getEntries().forEach(kv -> keys2.add(kv.getKey()));
+        
+        Set<String> onlyIn1 = new HashSet<>(keys1);
+        onlyIn1.removeAll(keys2);
+        
+        Set<String> onlyIn2 = new HashSet<>(keys2);
+        onlyIn2.removeAll(keys1);
+        
+        Set<String> common = new HashSet<>(keys1);
+        common.retainAll(keys2);
+        
+        System.out.println("仅在文件1中的键: " + onlyIn1.size());
+        if (!onlyIn1.isEmpty() && onlyIn1.size() < 10) {
+            System.out.println("  " + onlyIn1);
+        }
+        
+        System.out.println("仅在文件2中的键: " + onlyIn2.size());
+        if (!onlyIn2.isEmpty() && onlyIn2.size() < 10) {
+            System.out.println("  " + onlyIn2);
+        }
+        
+        // 比较共同键的值
+        int diffCount = 0;
+        for (String key : common) {
+            KeyValue kv1 = findByKey(res1.getEntries(), key);
+            KeyValue kv2 = findByKey(res2.getEntries(), key);
+            
+            if (!isEqual(kv1, kv2)) {
+                diffCount++;
+                if (diffCount <= 5) {
+                    System.out.println("键 '" + key + "' 存在差异:");
+                    System.out.println("  文件1: " + formatKV(kv1));
+                    System.out.println("  文件2: " + formatKV(kv2));
+                }
+            }
+        }
+        
+        System.out.println("值不一致的键数量: " + diffCount);
+    }
+    
+    private static KeyValue findByKey(List<KeyValue> entries, String key) {
+        for (KeyValue kv : entries) {
+            if (kv.getKey().equals(key)) return kv;
+        }
+        return null;
+    }
+    
+    private static boolean isEqual(KeyValue kv1, KeyValue kv2) {
+        if (kv1.isDeleted() != kv2.isDeleted()) return false;
+        if (kv1.isDeleted()) return true; // 都是删除状态，视为相同
+        return Objects.equals(kv1.getValue(), kv2.getValue());
+    }
+    
+    private static String formatKV(KeyValue kv) {
+        if (kv.isDeleted()) return "[DELETED] ts=" + kv.getTimestamp();
+        return "[VALUE='" + kv.getValue() + "'] ts=" + kv.getTimestamp();
+    }
+    
+    /**
      * 打印数据内容（可选择范围）
      */
     public static void printDataContent(AnalysisResult result, int maxEntries) {
@@ -202,42 +318,28 @@ public class SSTableAnalyzer {
         for (int i = 0; i < displayCount; i++) {
             KeyValue kv = entries.get(i);
             String status = kv.isDeleted() ? "已删除" : "活跃";
-            String value = kv.isDeleted() ? "-" : 
-                          (kv.getValue().length() > 25 ? kv.getValue().substring(0, 25) + "..." : kv.getValue());
+            String value = kv.getValue() == null ? "-" : kv.getValue();
+            if (value.length() > 28) value = value.substring(0, 25) + "...";
             String timestamp = formatTimestamp(kv.getTimestamp());
             
             System.out.printf("%-20s %-10s %-30s %-20s%n", 
                             kv.getKey(), status, value, timestamp);
         }
         
-        if (entries.size() > maxEntries) {
-            System.out.println("... 还有 " + (entries.size() - maxEntries) + " 条记录");
+        if (entries.size() > displayCount) {
+            System.out.println("... (还有 " + (entries.size() - displayCount) + " 条数据)");
         }
     }
-    
+
     /**
-     * 导出数据为JSON格式
+     * 导出为 JSON
      */
-    public static void exportToJson(AnalysisResult result, String outputPath) throws IOException {
-        if (!result.isValid()) {
-            throw new IOException("文件无效，无法导出");
-        }
-        
-        try (PrintWriter writer = new PrintWriter(new FileWriter(outputPath))) {
+    public static void exportToJson(AnalysisResult result, String outputFile) throws IOException {
+        try (PrintWriter writer = new PrintWriter(new FileWriter(outputFile))) {
             writer.println("{");
-            writer.println("  \"file_info\": {");
-            writer.println("    \"path\": \"" + result.getFilePath() + "\",");
-            writer.println("    \"size\": " + result.getFileSize() + ",");
-            writer.println("    \"creation_time\": " + result.getCreationTime());
-            writer.println("  },");
-            writer.println("  \"statistics\": {");
-            writer.println("    \"total_entries\": " + result.getEntryCount() + ",");
-            writer.println("    \"active_entries\": " + result.getActiveCount() + ",");
-            writer.println("    \"deleted_entries\": " + result.getDeletedCount() + ",");
-            writer.println("    \"total_key_size\": " + result.getTotalKeySize() + ",");
-            writer.println("    \"total_value_size\": " + result.getTotalValueSize() + ",");
-            writer.println("    \"compression_ratio\": " + result.getCompressionRatio());
-            writer.println("  },");
+            writer.println("  \"file\": \"" + result.getFilePath() + "\",");
+            writer.println("  \"size\": " + result.getFileSize() + ",");
+            writer.println("  \"created\": " + result.getCreationTime() + ",");
             writer.println("  \"entries\": [");
             
             List<KeyValue> entries = result.getEntries();
@@ -245,14 +347,17 @@ public class SSTableAnalyzer {
                 KeyValue kv = entries.get(i);
                 writer.print("    {");
                 writer.print("\"key\": \"" + escapeJson(kv.getKey()) + "\", ");
-                writer.print("\"value\": " + (kv.isDeleted() ? "null" : "\"" + escapeJson(kv.getValue()) + "\"") + ", ");
-                writer.print("\"timestamp\": " + kv.getTimestamp() + ", ");
-                writer.print("\"deleted\": " + kv.isDeleted());
+                writer.print("\"deleted\": " + kv.isDeleted() + ", ");
+                if (!kv.isDeleted()) {
+                    writer.print("\"value\": \"" + escapeJson(kv.getValue()) + "\", ");
+                }
+                writer.print("\"timestamp\": " + kv.getTimestamp());
                 writer.print("}");
                 if (i < entries.size() - 1) {
-                    writer.print(",");
+                    writer.println(",");
+                } else {
+                    writer.println();
                 }
-                writer.println();
             }
             
             writer.println("  ]");
@@ -260,49 +365,8 @@ public class SSTableAnalyzer {
         }
     }
     
-    /**
-     * 比较两个SSTable文件
-     */
-    public static void compareFiles(String file1Path, String file2Path) {
-        AnalysisResult result1 = analyzeFile(file1Path);
-        AnalysisResult result2 = analyzeFile(file2Path);
-        
-        System.out.println("=== SSTable 文件对比 ===");
-        System.out.printf("%-20s %-30s %-30s%n", "属性", "文件1", "文件2");
-        System.out.println("--------------------------------------------------------------------------------");
-        
-        System.out.printf("%-20s %-30s %-30s%n", "文件路径", 
-                         truncate(result1.getFilePath(), 28), truncate(result2.getFilePath(), 28));
-        System.out.printf("%-20s %-30s %-30s%n", "文件大小", 
-                         formatFileSize(result1.getFileSize()), formatFileSize(result2.getFileSize()));
-        System.out.printf("%-20s %-30d %-30d%n", "条目数量", 
-                         result1.getEntryCount(), result2.getEntryCount());
-        System.out.printf("%-20s %-30d %-30d%n", "活跃条目", 
-                         result1.getActiveCount(), result2.getActiveCount());
-        System.out.printf("%-20s %-30d %-30d%n", "删除条目", 
-                         result1.getDeletedCount(), result2.getDeletedCount());
-        System.out.printf("%-20s %-30s %-30s%n", "存储效率", 
-                         String.format("%.2f", result1.getCompressionRatio()),
-                         String.format("%.2f", result2.getCompressionRatio()));
-    }
-    
-    // 工具方法
-    private static String formatFileSize(long bytes) {
-        if (bytes < 1024) return bytes + " B";
-        if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
-        if (bytes < 1024 * 1024 * 1024) return String.format("%.1f MB", bytes / (1024.0 * 1024));
-        return String.format("%.1f GB", bytes / (1024.0 * 1024 * 1024));
-    }
-    
-    private static String formatTimestamp(long timestamp) {
-        return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date(timestamp));
-    }
-    
-    private static String escapeJson(String str) {
-        return str.replace("\\", "\\\\").replace("\"", "\\\"");
-    }
-    
-    private static String truncate(String str, int maxLength) {
-        return str.length() > maxLength ? str.substring(0, maxLength - 3) + "..." : str;
+    private static String escapeJson(String s) {
+        if (s == null) return "";
+        return s.replace("\"", "\\\"").replace("\\", "\\\\");
     }
 }

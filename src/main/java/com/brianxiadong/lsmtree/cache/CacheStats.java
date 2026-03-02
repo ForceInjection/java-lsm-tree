@@ -1,5 +1,11 @@
 package com.brianxiadong.lsmtree.cache;
 
+/**
+ * 缓存统计信息
+ * <p>
+ * 记录命中次数、未命中次数、驱逐次数等指标。
+ * 线程安全。
+ */
 public class CacheStats {
     private volatile long hits;
     private volatile long misses;

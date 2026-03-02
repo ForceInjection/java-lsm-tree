@@ -11,7 +11,15 @@ import com.brianxiadong.lsmtree.WriteAheadLog;
 
 /**
  * WAL (Write-Ahead Log) 文件分析器
- * 提供WAL文件的解析、统计、验证和分析功能
+ * <p>
+ * 用于解析和验证 WAL 日志文件，帮助调试数据恢复问题。
+ * 支持：
+ * <ul>
+ *   <li>解析日志条目格式</li>
+ *   <li>统计操作类型（PUT/DELETE）</li>
+ *   <li>验证时间戳单调性</li>
+ *   <li>检测无效或损坏的日志行</li>
+ * </ul>
  */
 public class WALAnalyzer {
 

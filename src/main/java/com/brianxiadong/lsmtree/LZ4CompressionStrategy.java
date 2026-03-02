@@ -7,6 +7,13 @@ import net.jpountz.lz4.LZ4FastDecompressor;
 import java.io.IOException;
 import java.util.Arrays;
 
+/**
+ * LZ4 压缩策略实现
+ * <p>
+ * 使用 lz4-java 库提供高性能的压缩和解压缩。
+ * 数据格式：
+ * [4 bytes original length] [compressed data]
+ */
 public class LZ4CompressionStrategy implements CompressionStrategy {
     private final LZ4Factory factory = LZ4Factory.fastestInstance();
     private final LZ4Compressor compressor = factory.fastCompressor();

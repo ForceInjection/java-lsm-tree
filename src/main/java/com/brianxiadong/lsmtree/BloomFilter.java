@@ -12,12 +12,24 @@ public class BloomFilter {
     private final int hashFunctions;
 
     public BloomFilter(int expectedElements, double falsePositiveProbability) {
-        // 计算最优位数组大小
-        this.size = (int) (-expectedElements * Math.log(falsePositiveProbability)
+        if (expectedElements <= 0) {
+            this.size = 1;
+            this.hashFunctions = 1;
+            this.bitSet = new BitSet(size);
+            return;
+        }
+        int computedSize = (int) (-expectedElements * Math.log(falsePositiveProbability)
                 / (Math.log(2) * Math.log(2)));
-        // 计算最优哈希函数个数
-        this.hashFunctions = (int) (size * Math.log(2) / expectedElements);
+        this.size = Math.max(1, computedSize);
+        int computedHashes = (int) (size * Math.log(2) / expectedElements);
+        this.hashFunctions = Math.max(1, computedHashes);
         this.bitSet = new BitSet(size);
+    }
+
+    private BloomFilter(int size, int hashFunctions, BitSet bitSet) {
+        this.size = Math.max(1, size);
+        this.hashFunctions = Math.max(1, hashFunctions);
+        this.bitSet = bitSet == null ? new BitSet(this.size) : bitSet;
     }
 
     /**
@@ -26,7 +38,9 @@ public class BloomFilter {
     public void add(String key) {
         for (int i = 0; i < hashFunctions; i++) {
             int hash = hash(key, i);
-            bitSet.set(Math.abs(hash % size));
+            // 使用 & 0x7FFFFFFF 确保结果为非负数，避免 Math.abs(Integer.MIN_VALUE) 导致负数的问题
+            int index = (hash & 0x7FFFFFFF) % size;
+            bitSet.set(index);
         }
     }
 
@@ -38,7 +52,8 @@ public class BloomFilter {
     public boolean mightContain(String key) {
         for (int i = 0; i < hashFunctions; i++) {
             int hash = hash(key, i);
-            if (!bitSet.get(Math.abs(hash % size))) {
+            int index = (hash & 0x7FFFFFFF) % size;
+            if (!bitSet.get(index)) {
                 return false;
             }
         }
@@ -66,10 +81,7 @@ public class BloomFilter {
      * 从字节数组恢复布隆过滤器
      */
     public static BloomFilter fromByteArray(byte[] data, int size, int hashFunctions) {
-        BloomFilter filter = new BloomFilter(1000, 0.01); // 临时创建
-        filter.bitSet.clear();
-        BitSet restored = BitSet.valueOf(data);
-        filter.bitSet.or(restored);
-        return filter;
+        BitSet restored = data == null ? new BitSet(Math.max(1, size)) : BitSet.valueOf(data);
+        return new BloomFilter(size, hashFunctions, restored);
     }
 }

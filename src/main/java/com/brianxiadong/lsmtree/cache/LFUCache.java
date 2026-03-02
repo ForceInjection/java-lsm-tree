@@ -3,6 +3,14 @@ package com.brianxiadong.lsmtree.cache;
 import java.util.*;
 import java.util.concurrent.locks.ReentrantLock;
 
+/**
+ * LFU (Least Frequently Used) 缓存实现
+ * <p>
+ * 根据元素的使用频率进行驱逐，频率最低的元素最先被移除。
+ * 如果频率相同，则移除最旧的（LRU 规则）。
+ * 实现了 O(1) 的 put 和 get 操作。
+ * 线程安全。
+ */
 public class LFUCache<K,V> implements InternalCache<K,V> {
     private final ReentrantLock lock = new ReentrantLock();
     private volatile int capacity;

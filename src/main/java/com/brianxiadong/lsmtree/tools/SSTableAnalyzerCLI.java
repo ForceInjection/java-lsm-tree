@@ -6,14 +6,10 @@ import java.util.Arrays;
 import java.util.Scanner;
 
 /**
- * SSTable 分析工具命令行界面
- * 
- * 提供多种分析SSTable文件的功能：
- * - 单文件分析：分析单个SSTable文件的结构和内容
- * - 文件比较：比较两个SSTable文件的差异
- * - 数据导出：将SSTable数据导出为JSON格式
- * - 批量分析：批量分析目录中的所有SSTable文件
- * - 交互模式：提供交互式命令行界面
+ * SSTable 分析工具命令行界面 (CLI)
+ * <p>
+ * 提供了用户友好的命令行交互方式来使用 {@link SSTableAnalyzer}。
+ * 支持单文件分析、批量扫描、内容导出等功能。
  * 
  * @author Brian Xia Dong
  * @version 1.0

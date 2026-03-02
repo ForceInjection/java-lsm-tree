@@ -3,6 +3,17 @@ package com.brianxiadong.lsmtree;
 import java.io.IOException;
 import java.util.*;
 
+/**
+ * Leveled 压缩策略
+ * <p>
+ * 类似于 LevelDB 和 RocksDB 的 Leveled Compaction。
+ * 将数据分为多个层级 (Level)，L0 层的数据允许重叠，L1 及以上层级的数据在每一层内是有序且不重叠的。
+ * 当某一层的数据量超过阈值时，会选择一个文件合并到下一层。
+ * <p>
+ * 适用场景：读密集型负载 (Read-Heavy Workloads)。
+ * 优点：读取放大较低（除 L0 外，每层最多只需查找一个文件），空间放大较低。
+ * 缺点：写入放大较高（数据可能被多次合并和重写）。
+ */
 public class LeveledCompactionStrategy implements CompactionStrategy {
     private final String dataDir;
     private final int maxLevelSize;
@@ -66,9 +77,18 @@ public class LeveledCompactionStrategy implements CompactionStrategy {
 
     /**
      * 压缩指定级别的SSTable
+     * <p>
+     * 注意：当前实现会将所有待合并的数据加载到内存中，这在数据量较大时会导致 OOM。
+     * 生产环境应当使用流式合并（Merge Sort Iterator）来避免将所有数据一次性加载到内存。
+     *
+     * @param tables 待合并的 SSTable 列表
+     * @param targetLevel 目标层级
+     * @return 合并后的新 SSTable 列表
+     * @throws IOException 如果发生 IO 错误
      */
     private List<SSTable> compactLevel(List<SSTable> tables, int targetLevel) throws IOException {
         // 收集所有键值对
+        // 警告：这里将所有数据加载到内存，存在 OOM 风险
         List<KeyValue> allEntries = new ArrayList<>();
 
         for (SSTable table : tables) {
@@ -110,7 +130,7 @@ public class LeveledCompactionStrategy implements CompactionStrategy {
         for (KeyValue entry : entries) {
             String key = entry.getKey();
             if (!latestEntries.containsKey(key) ||
-                    entry.getTimestamp() > latestEntries.get(key).getTimestamp()) {
+                    entry.getTimestamp() >= latestEntries.get(key).getTimestamp()) {
                 latestEntries.put(key, entry);
             }
         }

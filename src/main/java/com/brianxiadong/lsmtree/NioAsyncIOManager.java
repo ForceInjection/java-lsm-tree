@@ -17,6 +17,12 @@ import java.util.Objects;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 
+/**
+ * 基于 NIO AsynchronousFileChannel 的异步 I/O 管理器
+ * <p>
+ * 提供非阻塞的文件读写操作，并集成了 Micrometer 指标监控。
+ * 使用自定义的 ThreadPoolExecutor 来处理 I/O 回调。
+ */
 public class NioAsyncIOManager implements AsyncIOManager {
     private final ExecutorService ioExecutor;
     private final ConcurrentHashMap<String, AsynchronousFileChannel> channelCache = new ConcurrentHashMap<>();
@@ -82,7 +88,8 @@ public class NioAsyncIOManager implements AsyncIOManager {
                 return;
             }
             readBytes.increment(bytesRead);
-            buf.flip();
+            // 兼容 Java 8: 显式转换为 Buffer 以避免 NoSuchMethodError
+            ((java.nio.Buffer) buf).flip();
             byte[] out = new byte[buf.remaining()];
             buf.get(out);
             cf.complete(out);
@@ -109,14 +116,16 @@ public class NioAsyncIOManager implements AsyncIOManager {
 
     private void writeRecursive(AsynchronousFileChannel ch, long pos, ByteBuffer buf, CompletableFuture<Void> cf, long start) {
         ch.write(buf, pos, null, new CompletionHandlerImpl<>(written -> {
-            if (written > 0) writeBytes.increment(written);
+            if (written > 0) {
+                writeBytes.increment(written);
+            }
             if (buf.hasRemaining()) {
                 writeRecursive(ch, pos + written, buf, cf, start);
-                return;
+            } else {
+                inflight.decrementAndGet();
+                writeTimer.record(System.nanoTime() - start, TimeUnit.NANOSECONDS);
+                cf.complete(null);
             }
-            inflight.decrementAndGet();
-            writeTimer.record(System.nanoTime() - start, TimeUnit.NANOSECONDS);
-            cf.complete(null);
         }, ex -> {
             inflight.decrementAndGet();
             cf.completeExceptionally(ex);
@@ -129,17 +138,28 @@ public class NioAsyncIOManager implements AsyncIOManager {
         CompletableFuture<Void> cf = new CompletableFuture<>();
         inflight.incrementAndGet();
         long start = System.nanoTime();
-        ioExecutor.submit(() -> {
-            try (FileChannel fc = FileChannel.open(Paths.get(filename), StandardOpenOption.WRITE)) {
-                fc.force(true);
-                writeTimer.record(System.nanoTime() - start, TimeUnit.NANOSECONDS);
-                cf.complete(null);
-            } catch (IOException ex) {
-                cf.completeExceptionally(ex);
-            } finally {
-                inflight.decrementAndGet();
-            }
-        });
+        
+        // 使用 cached channel 进行 force，而不是打开新的 channel
+        // 打开新 channel 并 force 可能无法刷新 AsynchronousFileChannel 写入的数据
+        try {
+            AsynchronousFileChannel ch = openChannel(filename);
+            // AsynchronousFileChannel.force 是同步方法，但在 AsyncIOManager 中应该异步执行吗？
+            // force 可能会阻塞，所以提交到线程池执行是正确的
+            ioExecutor.submit(() -> {
+                try {
+                    ch.force(true);
+                    writeTimer.record(System.nanoTime() - start, TimeUnit.NANOSECONDS);
+                    cf.complete(null);
+                } catch (IOException ex) {
+                    cf.completeExceptionally(ex);
+                } finally {
+                    inflight.decrementAndGet();
+                }
+            });
+        } catch (IOException e) {
+            inflight.decrementAndGet();
+            cf.completeExceptionally(e);
+        }
         return cf;
     }
 

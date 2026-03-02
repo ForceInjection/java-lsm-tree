@@ -9,6 +9,13 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 
+/**
+ * 简单的 Metrics HTTP 服务器
+ * <p>
+ * 提供 /metrics 端点，暴露 Prometheus 格式的监控指标。
+ * 可通过系统属性 lsm.metrics.http.enabled=true 启用，
+ * 并通过 lsm.metrics.http.port 配置端口（默认 9091）。
+ */
 public class MetricsHttpServer {
     private static volatile HttpServer server;
 

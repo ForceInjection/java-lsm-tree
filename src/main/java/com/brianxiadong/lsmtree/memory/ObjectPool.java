@@ -2,6 +2,10 @@ package com.brianxiadong.lsmtree.memory;
 
 /**
  * 对象池接口
+ * <p>
+ * 定义了对象借用 (Borrow) 和归还 (Return) 的标准行为。
+ * 用于复用高频创建销毁的对象，减轻 GC 压力。
+ * 
  * @param <T> 对象类型
  */
 public interface ObjectPool<T> {

@@ -3,6 +3,18 @@ package com.brianxiadong.lsmtree;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * 范围分区策略
+ * <p>
+ * 根据预定义的边界 (Boundaries) 将 Key 分配到不同的分区。
+ * 例如：边界为 ["d", "m"]，则：
+ * - key <= "d" -> Partition 0
+ * - "d" < key <= "m" -> Partition 1
+ * - key > "m" -> Partition 2
+ * <p>
+ * 优点：支持高效的范围查询（只需查询涉及的分区）。
+ * 缺点：如果 Key 分布不均，可能导致数据倾斜 (Data Skew)。
+ */
 public class RangePartitionStrategy implements PartitionStrategy {
     private final List<String> boundaries; // sorted exclusive upper bounds per partition except last
 

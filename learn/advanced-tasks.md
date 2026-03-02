@@ -500,10 +500,12 @@ public interface CacheManager {
 
 #### 4.2.2 技术要求
 
-- 重构文件 I/O 为异步模式
+- 重构文件 I/O 为异步模式（使用 AsynchronousFileChannel）
 - 实现 I/O 线程池管理
-- 支持批量 I/O 操作
-- 优化内存映射文件使用
+- 支持批量 I/O 操作（Group Commit）
+- 优化内存映射文件使用（MappedByteBuffer）
+- **实现 Direct I/O 支持（减少内核态到用户态的拷贝）**
+- **引入细粒度锁控制（ReadWriteLock）以减少读写阻塞**
 - 实现 I/O 性能监控
 
 #### 4.2.3 核心实现
@@ -522,6 +524,8 @@ public interface AsyncIOManager {
 - [ ] 基准测试：同步 I/O 100MB/s → 异步 I/O > 130MB/s（4KB 随机读写）
 - [ ] 支持 5000+ 并发 I/O 操作而不出现阻塞（基于 NVMe SSD）
 - [ ] CPU 利用率相比同步模式优化 > 15%（基于相同工作负载和硬件配置）
+- [ ] **SSTable 文件读写全面迁移至 NIO（AsynchronousFileChannel/FileChannel）**
+- [ ] **读写锁粒度优化覆盖 90% 以上的临界区，读操作不再完全阻塞写操作**
 - [ ] 连续 24 小时压力测试无内存泄漏和性能衰减
 
 #### 4.2.5 测试策略

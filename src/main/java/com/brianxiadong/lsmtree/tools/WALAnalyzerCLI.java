@@ -6,8 +6,10 @@ import java.util.Arrays;
 import java.util.Scanner;
 
 /**
- * WAL分析器命令行界面
- * 提供WAL文件分析、验证、导出等功能的命令行工具
+ * WAL 分析器命令行界面 (CLI)
+ * <p>
+ * 提供了操作 {@link WALAnalyzer} 的命令行入口。
+ * 支持日志分析、完整性验证和数据导出。
  */
 public class WALAnalyzerCLI {
 

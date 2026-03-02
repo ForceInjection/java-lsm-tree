@@ -4,6 +4,9 @@ import java.io.IOException;
 
 /**
  * LSM Tree 使用示例
+ * <p>
+ * 展示了如何初始化 LSM Tree，以及进行基本的 Put, Get, Delete 操作。
+ * 同时包含了简单的性能测试和统计信息展示。
  */
 public class LSMTreeExample {
     public static void main(String[] args) {

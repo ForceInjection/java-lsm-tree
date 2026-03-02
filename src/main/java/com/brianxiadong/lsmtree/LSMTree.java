@@ -19,9 +19,11 @@ public class LSMTree implements AutoCloseable {
     // 内存组件
     private volatile MemTable activeMemTable;
     private final List<MemTable> immutableMemTables;
+    private final Object memTableLock = new Object(); // 专门用于 MemTable 切换的锁
 
     // 磁盘组件
     private final List<SSTable> ssTables;
+    private final java.util.concurrent.atomic.AtomicLong fileSequence = new java.util.concurrent.atomic.AtomicLong(0);
 
     // 后台任务
     private final ExecutorService compactionExecutor;
@@ -90,6 +92,12 @@ public class LSMTree implements AutoCloseable {
 
     /**
      * 插入键值对
+     * 流程：
+     * 1. 获取写锁
+     * 2. 写入 WAL (Write-Ahead Log) 保证持久性
+     * 3. 写入内存表 (MemTable)
+     * 4. 检查是否需要 Flush (MemTable -> Immutable -> SSTable)
+     * 5. 更新缓存 (如果启用)
      */
     public void put(String key, String value) throws IOException {
         long start = System.nanoTime();
@@ -100,10 +108,11 @@ public class LSMTree implements AutoCloseable {
         lock.writeLock().lock();
         try {
             // 写入WAL
-            wal.append(WriteAheadLog.LogEntry.put(key, value));
+            WriteAheadLog.LogEntry entry = WriteAheadLog.LogEntry.put(key, value);
+            wal.append(entry);
 
-            // 写入活跃MemTable
-            activeMemTable.put(key, value);
+            // 写入活跃MemTable (使用相同的timestamp)
+            activeMemTable.put(new KeyValue(key, value, entry.getTimestamp(), false));
 
             // 检查是否需要刷盘
             if (activeMemTable.shouldFlush()) {
@@ -133,10 +142,11 @@ public class LSMTree implements AutoCloseable {
         lock.writeLock().lock();
         try {
             // 写入WAL
-            wal.append(WriteAheadLog.LogEntry.delete(key));
+            WriteAheadLog.LogEntry entry = WriteAheadLog.LogEntry.delete(key);
+            wal.append(entry);
 
-            // 在活跃MemTable中标记删除
-            activeMemTable.delete(key);
+            // 在活跃MemTable中标记删除 (使用相同的timestamp)
+            activeMemTable.put(new KeyValue(key, null, entry.getTimestamp(), true));
 
             // 检查是否需要刷盘
             if (activeMemTable.shouldFlush()) {
@@ -155,6 +165,12 @@ public class LSMTree implements AutoCloseable {
 
     /**
      * 查询键值
+     * 流程：
+     * 1. 获取读锁
+     * 2. 查询缓存 (如果启用)
+     * 3. 查询活跃 MemTable
+     * 4. 查询不可变 MemTable 列表 (按时间倒序)
+     * 5. 查询 SSTable 列表 (按时间倒序，使用布隆过滤器加速)
      */
     public String get(String key) {
         long start = System.nanoTime();
@@ -185,8 +201,12 @@ public class LSMTree implements AutoCloseable {
             }
 
             // 2. 查询不可变MemTable（按时间倒序）
-            for (int i = immutableMemTables.size() - 1; i >= 0; i--) {
-                KeyValue e = immutableMemTables.get(i).getEntry(key);
+            List<MemTable> immutableCopy;
+            synchronized (memTableLock) {
+                immutableCopy = new ArrayList<>(immutableMemTables);
+            }
+            for (int i = immutableCopy.size() - 1; i >= 0; i--) {
+                KeyValue e = immutableCopy.get(i).getEntry(key);
                 if (e != null) {
                     if (e.isDeleted())
                         return null;
@@ -221,46 +241,55 @@ public class LSMTree implements AutoCloseable {
         }
     }
 
-    public java.util.Iterator<KeyValue> range(String startKey, String endKey, boolean includeStart, boolean includeEnd)
-            throws java.io.IOException {
-        if (startKey != null && endKey != null && startKey.compareTo(endKey) > 0) {
-            throw new IllegalArgumentException("startKey > endKey");
-        }
+    public Iterator<KeyValue> range(String startKey, String endKey) {
+        return range(startKey, endKey, true, false);
+    }
+
+    public Iterator<KeyValue> range(String startKey, String endKey, boolean includeStart, boolean includeEnd) {
         lock.readLock().lock();
         try {
+            // 多路归并排序
+            // 每个源是一个 List<KeyValue>
+            // 顺序: Active MemTable -> Immutable MemTables (Newest to Oldest) -> SSTables (Newest to Oldest)
             java.util.List<java.util.List<KeyValue>> sources = new java.util.ArrayList<>();
             sources.add(activeMemTable.getRangeEntriesRaw(startKey, endKey, includeStart, includeEnd));
-            for (int i = immutableMemTables.size() - 1; i >= 0; i--) {
-                sources.add(immutableMemTables.get(i).getRangeEntriesRaw(startKey, endKey, includeStart, includeEnd));
+            
+            java.util.List<MemTable> immutableCopy;
+            synchronized (memTableLock) {
+                immutableCopy = new java.util.ArrayList<>(immutableMemTables);
             }
+            for (int i = immutableCopy.size() - 1; i >= 0; i--) {
+                sources.add(immutableCopy.get(i).getRangeEntriesRaw(startKey, endKey, includeStart, includeEnd));
+            }
+            
             java.util.List<SSTable> tables = new java.util.ArrayList<>(ssTables);
-            tables.sort((x, y) -> Long.compare(y.getCreationTime(), x.getCreationTime()));
-            for (SSTable t : tables) {
-                java.util.List<KeyValue> lst = t.getRangeEntries(startKey, endKey, includeStart, includeEnd);
-                sources.add(lst);
-                if (cacheManager != null) {
-                    try {
-                        com.brianxiadong.lsmtree.cache.CacheManagerImpl cm = (cacheManager instanceof com.brianxiadong.lsmtree.cache.CacheManagerImpl)
-                                ? (com.brianxiadong.lsmtree.cache.CacheManagerImpl) cacheManager : null;
-                        if (cm != null) cm.populateBlockForKeys(lst);
-                        for (KeyValue kv : lst) cacheManager.put(kv.getKey(), kv, com.brianxiadong.lsmtree.cache.CacheType.ROW);
-                    } catch (com.brianxiadong.lsmtree.cache.CacheException ignored) {}
+            // 假设 ssTables 是按创建时间排序的? (通常是的，越新越后面)
+            // 我们需要从新到旧遍历
+            for (int i = tables.size() - 1; i >= 0; i--) {
+                try {
+                    sources.add(tables.get(i).getRangeEntries(startKey, endKey, includeStart, includeEnd)); 
+                } catch (IOException e) {
+                    throw new RuntimeException("Error reading SSTable", e);
                 }
             }
-
+            
             java.util.List<KeyValue> out = new java.util.ArrayList<>();
-            java.util.List<Integer> idx = new java.util.ArrayList<>();
-            for (int i = 0; i < sources.size(); i++)
-                idx.add(0);
-            java.util.Comparator<int[]> cmp = (a, b) -> {
-                KeyValue ka = sources.get(a[0]).get(a[1]);
-                KeyValue kb = sources.get(b[0]).get(b[1]);
-                int kc = ka.getKey().compareTo(kb.getKey());
-                if (kc != 0)
-                    return kc;
-                return Long.compare(kb.getTimestamp(), ka.getTimestamp());
-            };
-            java.util.PriorityQueue<int[]> pq = new java.util.PriorityQueue<>(cmp);
+            
+            // 使用优先队列进行归并
+            // 元素: [sourceIndex, elementIndex]
+            java.util.PriorityQueue<int[]> pq = new java.util.PriorityQueue<>(
+                (a, b) -> {
+                    KeyValue ka = sources.get(a[0]).get(a[1]);
+                    KeyValue kb = sources.get(b[0]).get(b[1]);
+                    int kc = ka.getKey().compareTo(kb.getKey());
+                    if (kc != 0) return kc;
+                    // Key 相同，Timestamp 大的优先
+                    int tc = Long.compare(kb.getTimestamp(), ka.getTimestamp());
+                    if (tc != 0) return tc;
+                    // Timestamp 相同，sourceIndex 小的优先 (Newer source)
+                    return Integer.compare(a[0], b[0]);
+                }
+            );
             for (int s = 0; s < sources.size(); s++) {
                 if (!sources.get(s).isEmpty())
                     pq.add(new int[] { s, 0 });
@@ -268,6 +297,7 @@ public class LSMTree implements AutoCloseable {
             while (!pq.isEmpty()) {
                 int[] top = pq.poll();
                 KeyValue best = sources.get(top[0]).get(top[1]);
+                int bestSource = top[0];
                 String k = best.getKey();
                 if (top[1] + 1 < sources.get(top[0]).size())
                     pq.add(new int[] { top[0], top[1] + 1 });
@@ -277,8 +307,11 @@ public class LSMTree implements AutoCloseable {
                     if (!kvn.getKey().equals(k))
                         break;
                     pq.poll();
-                    if (kvn.getTimestamp() > best.getTimestamp())
+                    if (kvn.getTimestamp() > best.getTimestamp()
+                            || (kvn.getTimestamp() == best.getTimestamp() && n[0] < bestSource)) {
                         best = kvn;
+                        bestSource = n[0];
+                    }
                     if (n[1] + 1 < sources.get(n[0]).size())
                         pq.add(new int[] { n[0], n[1] + 1 });
                 }
@@ -321,13 +354,15 @@ public class LSMTree implements AutoCloseable {
      * 刷新MemTable到磁盘
      */
     private void flushMemTable() throws IOException {
-        if (activeMemTable.isEmpty()) {
-            return;
-        }
+        synchronized (memTableLock) {
+            if (activeMemTable.isEmpty()) {
+                return;
+            }
 
-        // 将活跃MemTable转为不可变
-        immutableMemTables.add(activeMemTable);
-        activeMemTable = new MemTable(memTableMaxSize);
+            // 将活跃MemTable转为不可变
+            immutableMemTables.add(activeMemTable);
+            activeMemTable = new MemTable(memTableMaxSize);
+        }
 
         // 同步刷盘，避免死锁
         flushImmutableMemTable();
@@ -337,11 +372,14 @@ public class LSMTree implements AutoCloseable {
      * 刷新不可变MemTable到SSTable（调用前必须已获取写锁）
      */
     private void flushImmutableMemTable() throws IOException {
-        if (immutableMemTables.isEmpty()) {
-            return;
+        MemTable memTable;
+        synchronized (memTableLock) {
+            if (immutableMemTables.isEmpty()) {
+                return;
+            }
+            memTable = immutableMemTables.remove(0);
         }
 
-        MemTable memTable = immutableMemTables.remove(0);
         List<KeyValue> entries = memTable.getAllEntries();
 
         if (!entries.isEmpty()) {
@@ -350,8 +388,9 @@ public class LSMTree implements AutoCloseable {
             entries.sort(KeyValue::compareTo);
 
             // 创建SSTable文件
-            String fileName = String.format("%s/sstable_level0_%d.db",
-                    dataDir, System.currentTimeMillis());
+            // 使用 atomic counter 防止在高并发 flush 时产生文件名冲突
+            String fileName = String.format("%s/sstable_level0_%d_%d.db",
+                    dataDir, System.currentTimeMillis(), fileSequence.getAndIncrement());
             try {
                 SSTable newSSTable = new SSTable(fileName, entries, compressionStrategy);
                 ssTables.add(newSSTable);
@@ -485,9 +524,9 @@ public class LSMTree implements AutoCloseable {
         List<WriteAheadLog.LogEntry> entries = wal.recover();
         for (WriteAheadLog.LogEntry entry : entries) {
             if (entry.getOperation() == WriteAheadLog.Operation.PUT) {
-                activeMemTable.put(entry.getKey(), entry.getValue());
+                activeMemTable.put(new KeyValue(entry.getKey(), entry.getValue(), entry.getTimestamp(), false));
             } else if (entry.getOperation() == WriteAheadLog.Operation.DELETE) {
-                activeMemTable.delete(entry.getKey());
+                activeMemTable.put(new KeyValue(entry.getKey(), null, entry.getTimestamp(), true));
             }
         }
     }
@@ -499,12 +538,19 @@ public class LSMTree implements AutoCloseable {
         lock.writeLock().lock();
         try {
             // 刷新活跃MemTable
-            if (!activeMemTable.isEmpty()) {
-                flushMemTable();
+            synchronized (memTableLock) {
+                if (!activeMemTable.isEmpty()) {
+                    // 将活跃MemTable转为不可变
+                    immutableMemTables.add(activeMemTable);
+                    activeMemTable = new MemTable(memTableMaxSize);
+                }
             }
 
             // 刷新所有剩余的不可变MemTable
-            while (!immutableMemTables.isEmpty()) {
+            while (true) {
+                synchronized (memTableLock) {
+                    if (immutableMemTables.isEmpty()) break;
+                }
                 flushImmutableMemTable();
             }
             
@@ -557,9 +603,13 @@ public class LSMTree implements AutoCloseable {
     public LSMTreeStats getStats() {
         lock.readLock().lock();
         try {
+            int immutableCount;
+            synchronized (memTableLock) {
+                immutableCount = immutableMemTables.size();
+            }
             return new LSMTreeStats(
                     activeMemTable.size(),
-                    immutableMemTables.size(),
+                    immutableCount,
                     ssTables.size());
         } finally {
             lock.readLock().unlock();

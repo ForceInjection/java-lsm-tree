@@ -147,6 +147,12 @@ public class BenchmarkRunner {
             totalErrors.set(0);
         }
         
+        /**
+         * 记录操作延迟
+         * <p>
+         * 注意：在高并发测试下，这里对 list 的同步访问会成为性能瓶颈，严重影响吞吐量测试结果。
+         * 建议使用 HdrHistogram 或其他并发友好的统计工具来收集延迟数据。
+         */
         public void recordOperation(long latencyNanos) {
             synchronized (latencies) {
                 latencies.add(latencyNanos);
@@ -726,14 +732,14 @@ public class BenchmarkRunner {
         System.out.println("\n=== 顺序写入性能测试 ===");
         
         LSMTree lsmTree = null;
-        PerformanceStats stats = new PerformanceStats();
         
         try {
             lsmTree = createLSMTree("sequential_writes");
-            stats.start();
-            
             // 预热
             performWarmup(lsmTree, "写入");
+            
+            PerformanceStats stats = new PerformanceStats();
+            stats.start();
             
             Random random = new Random(config.randomSeed);
             
@@ -933,22 +939,19 @@ public class BenchmarkRunner {
                         readStats.recordOperation(endTime - startTime);
                     } catch (Exception e) {
                         readStats.recordError();
-                        System.err.printf("混合工作负载读取失败 (key=%s): %s%n", key, e.getMessage());
                     }
                 } else {
                     // 写入操作
                     String key = String.format("key_%08d", config.numOperations / 2 + i);
                     String value = generateRandomValue(random, config.valueSize);
-                    existingKeys.add(key);
-                    
                     long startTime = System.nanoTime();
                     try {
                         lsmTree.put(key, value);
                         long endTime = System.nanoTime();
                         writeStats.recordOperation(endTime - startTime);
+                        existingKeys.add(key);
                     } catch (Exception e) {
                         writeStats.recordError();
-                        System.err.printf("混合工作负载写入失败 (key=%s): %s%n", key, e.getMessage());
                     }
                 }
                 

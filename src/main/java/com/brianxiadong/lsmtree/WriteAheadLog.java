@@ -57,6 +57,15 @@ public class WriteAheadLog {
         }
     }
 
+    /**
+     * 创建检查点
+     * 注意：当前实现会直接删除旧的 WAL 文件并创建新的。
+     * 生产环境中应该使用 Log Rotation (日志轮转) 机制：
+     * 1. 重命名当前 WAL 为 .old
+     * 2. 创建新的 WAL
+     * 3. 只有在新 WAL 成功创建后才删除 .old
+     * 这样可以防止在删除后创建前崩溃导致数据丢失。
+     */
     public void checkpoint() throws IOException {
         synchronized (lock) {
             if (channel != null && channel.isOpen())

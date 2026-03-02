@@ -6,7 +6,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 堆外内存管理器
+ * 堆外内存 (Direct Memory) 管理器
+ * <p>
+ * 通过池化 {@link ByteBuffer} 来减少 direct memory 的分配和释放开销。
+ * Direct ByteBuffer 的分配通常比 Heap ByteBuffer 昂贵。
  */
 public class DirectMemoryManager {
     private final ConcurrentLinkedQueue<ByteBuffer> bufferPool = new ConcurrentLinkedQueue<>();
@@ -22,7 +25,8 @@ public class DirectMemoryManager {
         // 尝试从池中获取
         ByteBuffer buffer = bufferPool.poll();
         if (buffer != null && buffer.capacity() >= size) {
-            buffer.clear();
+            // 兼容 Java 8: 显式转换为 Buffer
+            ((java.nio.Buffer) buffer).clear();
             poolSize.decrementAndGet();
             return buffer;
         }
@@ -43,7 +47,8 @@ public class DirectMemoryManager {
         
         // 如果池未满，放回池中
         if (poolSize.get() < MAX_POOL_SIZE) {
-            buffer.clear();
+            // 兼容 Java 8: 显式转换为 Buffer
+            ((java.nio.Buffer) buffer).clear();
             bufferPool.offer(buffer);
             poolSize.incrementAndGet();
         } else {
