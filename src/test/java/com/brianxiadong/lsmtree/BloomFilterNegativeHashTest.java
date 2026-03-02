@@ -48,12 +48,6 @@ public class BloomFilterNegativeHashTest {
     @Test
     public void testOtherNegativeKeys() {
         TestLogger log = new TestLogger("普通负数 Hash 测试");
-        // 寻找其他负数 hash 的 key
-        String key = "1"; // hash 49
-        // 简单构造一些可能为负的
-        // "dd" hash 3232
-        // 只要循环找几个就行
-        
         BloomFilter bf = new BloomFilter(100, 0.01);
         int negativeCount = 0;
         

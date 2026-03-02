@@ -26,6 +26,8 @@ public class MemoryManagerFunctionTest {
         
         // 分配 2KB
         ByteBuffer buf2 = dmm.allocate(2048);
+        Assert.assertTrue(buf2.isDirect());
+        Assert.assertEquals(2048, buf2.capacity());
         
         // 验证统计
         DirectMemoryManager.DirectMemoryStats stats = dmm.getStats();
@@ -42,8 +44,7 @@ public class MemoryManagerFunctionTest {
         ByteBuffer buf3 = dmm.allocate(1024);
         stats = dmm.getStats();
         Assert.assertEquals(0, stats.getPoolSize()); // 池空了
-        Assert.assertEquals(buf1, buf3); // 引用相同（假设池实现是LIFO或FIFO且没有其他并发）
-        // 注意：ConcurrentLinkedQueue 是 FIFO，所以 poll 出来的确实是刚刚 offer 进去的 buf1
+        Assert.assertEquals(buf1, buf3); // 重用了池中的 buf1
     }
 
     @Test
@@ -63,23 +64,11 @@ public class MemoryManagerFunctionTest {
         // 归还对象
         pool.returnObject(i1);
         
-        // 再次借用，应该拿到归还的 i1 (ConcurrentLinkedQueue 是 FIFO? 不，是 Queue，所以 offer 在尾，poll 在头)
-        // 刚归还 i1 到队尾。
-        // 池中现在有 [i1]
-        
+        // 再次借用，应该拿到归还的 i1
         Integer i3 = pool.borrowObject();
-        // 因为 i1 被归还并重新放入队列尾部，且队列中可能有其他对象（如果 i2 被创建并放入？不，i2 没归还）
-        // 如果 i2 没归还，池中只有 i1。
-        // borrowObject: poll -> i1.
         Assert.assertEquals(Integer.valueOf(1), i3);
         
         PoolStats stats = pool.getStats();
-        // active: i2 (borrowed, not returned) + i3 (borrowed, i1 reused) = 2 active objects?
-        // Let's count:
-        // 1. borrow i1 -> active=1
-        // 2. borrow i2 -> active=2
-        // 3. return i1 -> active=1
-        // 4. borrow i3 -> active=2
         Assert.assertEquals(2, stats.getActiveCount());
     }
     
