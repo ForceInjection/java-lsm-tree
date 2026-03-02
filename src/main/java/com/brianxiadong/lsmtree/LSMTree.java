@@ -493,7 +493,7 @@ public class LSMTree implements AutoCloseable {
     }
 
     /**
-     * 强制刷盘
+     * 强制刷新所有数据到磁盘（包括 MemTable 和 WAL 检查点）
      */
     public void flush() throws IOException {
         lock.writeLock().lock();
@@ -507,6 +507,9 @@ public class LSMTree implements AutoCloseable {
             while (!immutableMemTables.isEmpty()) {
                 flushImmutableMemTable();
             }
+            
+            // 创建WAL检查点（清空WAL）
+            wal.checkpoint();
         } finally {
             lock.writeLock().unlock();
         }

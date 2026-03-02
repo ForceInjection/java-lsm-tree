@@ -99,9 +99,13 @@ build_project() {
         exit 1
     fi
     
-    # 拉取 Maven 镜像
-    log_info "拉取 Maven 镜像..."
-    docker pull ${MAVEN_IMAGE}
+    # 检查并拉取 Maven 镜像
+    if [[ "$(docker images -q ${MAVEN_IMAGE} 2> /dev/null)" == "" ]]; then
+        log_info "拉取 Maven 镜像..."
+        docker pull ${MAVEN_IMAGE}
+    else
+        log_info "Maven 镜像 ${MAVEN_IMAGE} 已存在，跳过拉取。"
+    fi
     
     # 创建构建输出目录
     mkdir -p "${BUILD_DIR}/logs"
@@ -152,6 +156,9 @@ run_tests() {
         -v "${PROJECT_ROOT}":/workspace \
         -v "${HOME}/.m2":/root/.m2 \
         -w /workspace \
+        -e LANG=C.UTF-8 \
+        -e LC_ALL=C.UTF-8 \
+        -e JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8" \
         ${MAVEN_IMAGE} \
         mvn test \
         | tee "${BUILD_DIR}/logs/test-$(date +%Y%m%d-%H%M%S).log"

@@ -84,8 +84,62 @@ get_category_overall_status() {
 # HTML 报告生成
 # =============================================================================
 
+# 提取性能数据生成 JSON
+extract_performance_data() {
+    # 注意：TEST_SESSION_ID 已经在 session.sh 中导出，可以直接使用
+    # 但是，如果我们在 reports.sh 中调用此函数，需要确保 RESULTS_DIR 等变量可用
+    # 通常 SESSION_DIR 是可用的
+    local perf_dir="${SESSION_DIR}/performance"
+    
+    local labels_json="[]"
+    local throughput_json="[]"
+    
+    if [ -d "${perf_dir}" ]; then
+        # 查找最新的结果文件
+        local result_file=$(find "${perf_dir}" -name "performance_results_*.txt" | sort | tail -n 1)
+        
+        if [ -f "${result_file}" ]; then
+            # 提取数据 - 使用 awk 提取数值，确保只取数字部分
+            local seq_write_ops=$(grep -A 10 "=== 顺序写入 详细统计 ===" "${result_file}" | grep "吞吐量" | awk '{print $2}' | head -n 1)
+            local rand_write_ops=$(grep -A 10 "=== 随机写入 详细统计 ===" "${result_file}" | grep "吞吐量" | awk '{print $2}' | head -n 1)
+            local read_ops=$(grep -A 10 "=== 读取 详细统计 ===" "${result_file}" | grep "吞吐量" | awk '{print $2}' | head -n 1)
+            
+            # 混合工作负载可能有多个部分，需要更精确的匹配
+            # 混合写入
+            local mixed_write_ops=$(grep -A 10 "=== 混合工作负载 - 写入 详细统计 ===" "${result_file}" | grep "吞吐量" | awk '{print $2}' | head -n 1)
+            # 混合读取
+            local mixed_read_ops=$(grep -A 10 "=== 混合工作负载 - 读取 详细统计 ===" "${result_file}" | grep "吞吐量" | awk '{print $2}' | head -n 1)
+            
+            # 构建 JSON 数组字符串
+            labels_json='["顺序写入", "随机写入", "读取", "混合写入", "混合读取"]'
+            
+            # 处理空值，默认为0
+            seq_write_ops=${seq_write_ops:-0}
+            rand_write_ops=${rand_write_ops:-0}
+            read_ops=${read_ops:-0}
+            mixed_write_ops=${mixed_write_ops:-0}
+            mixed_read_ops=${mixed_read_ops:-0}
+            
+            throughput_json="[${seq_write_ops}, ${rand_write_ops}, ${read_ops}, ${mixed_write_ops}, ${mixed_read_ops}]"
+        fi
+    fi
+    
+    # 返回 JSON 对象
+    echo "{\"labels\": ${labels_json}, \"throughput\": ${throughput_json}}" | tr -d '\n'
+}
+
 # 生成 HTML 报告
 generate_html_report() {
+    # 提取性能数据
+    local perf_data=$(extract_performance_data)
+    # 使用 jq 解析 JSON，如果 jq 不存在或解析失败，提供默认值
+    # 注意：使用 tr -d '\n' 确保输出没有换行符，避免 sed 替换时出错
+    local perf_labels=$(echo "$perf_data" | jq -c -r '.labels' 2>/dev/null | tr -d '\n')
+    if [ -z "$perf_labels" ]; then perf_labels="[]"; fi
+    
+    local perf_throughput=$(echo "$perf_data" | jq -c -r '.throughput' 2>/dev/null | tr -d '\n')
+    if [ -z "$perf_throughput" ]; then perf_throughput="[]"; fi
+
     # 确保 reports 目录存在
     local reports_dir="${SESSION_DIR}/reports"
     mkdir -p "${reports_dir}"
@@ -101,6 +155,8 @@ generate_html_report() {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Java LSM Tree 测试报告</title>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         * {
             margin: 0;
@@ -242,6 +298,16 @@ generate_html_report() {
             padding: 20px;
             background: #f8f9fa;
             border-radius: 5px;
+            min-height: 400px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .chart-container {
+            width: 100%;
+            max-width: 800px;
+            height: 350px;
         }
         
         .chart-placeholder {
@@ -361,7 +427,19 @@ generate_html_report() {
             <div class="test-content">
                 PERFORMANCE_TESTS_PLACEHOLDER
                 <div class="performance-chart">
-                    <div class="chart-placeholder">性能图表 (需要实际数据)</div>
+                    <div class="chart-container">
+                        <canvas id="throughputChart"></canvas>
+                    </div>
+                    <div style="margin-top: 20px; text-align: left; width: 100%; max-width: 800px; color: #666; font-size: 0.9em; padding: 15px; background: #fff; border-radius: 5px;">
+                        <h4 style="margin-bottom: 10px; color: #333;">📊 指标说明：</h4>
+                        <ul style="list-style-type: none; padding: 0;">
+                            <li style="margin-bottom: 5px;">🔹 <strong>顺序写入</strong>: Key 按顺序递增写入。这是 LSM Tree 的理想场景，通常能达到最高吞吐量。</li>
+                            <li style="margin-bottom: 5px;">🔹 <strong>随机写入</strong>: Key 随机分布写入。LSM Tree 将随机写转换为内存顺序写，性能依然很高，是核心优势之一。</li>
+                            <li style="margin-bottom: 5px;">🔹 <strong>读取</strong>: 随机 Key 读取。在本基准测试中，我们增加了数据量并降低了 MemTable 阈值，强制触发 Flush 生成 SSTable。因此，读取操作需要查询 MemTable 和磁盘上的 SSTable，受磁盘 I/O 和层级结构影响，性能通常低于写入。</li>
+                            <li style="margin-bottom: 5px;">🔹 <strong>混合写入/读取</strong>: 读写混合场景下的性能表现，反映真实业务负载下的综合能力。</li>
+                        </ul>
+                        <p style="margin-top: 10px; font-style: italic;">* 单位：ops/sec (每秒操作次数)，数值越高越好。</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -387,6 +465,62 @@ generate_html_report() {
     </div>
     
     <script>
+        // 性能图表数据
+        const perfLabels = PERF_LABELS_PLACEHOLDER;
+        const perfThroughput = PERF_THROUGHPUT_PLACEHOLDER;
+        
+        // 渲染图表
+        if (perfLabels.length > 0 && perfThroughput.length > 0 && document.getElementById('throughputChart')) {
+            const ctx = document.getElementById('throughputChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: perfLabels,
+                    datasets: [{
+                        label: '吞吐量 (ops/sec)',
+                        data: perfThroughput,
+                        backgroundColor: [
+                            'rgba(255, 99, 132, 0.5)',
+                            'rgba(54, 162, 235, 0.5)',
+                            'rgba(255, 206, 86, 0.5)',
+                            'rgba(75, 192, 192, 0.5)',
+                            'rgba(153, 102, 255, 0.5)'
+                        ],
+                        borderColor: [
+                            'rgba(255, 99, 132, 1)',
+                            'rgba(54, 162, 235, 1)',
+                            'rgba(255, 206, 86, 1)',
+                            'rgba(75, 192, 192, 1)',
+                            'rgba(153, 102, 255, 1)'
+                        ],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '基准测试吞吐量对比 (越高越好)'
+                        },
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'ops/sec'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
         // 切换详细信息显示
         function toggleDetails(element) {
             const details = element.nextElementSibling;
@@ -412,8 +546,12 @@ generate_html_report() {
 </body>
 </html>
 EOF
-
-    # 替换占位符
+    
+    # 替换性能数据占位符
+    sed -i '' "s/PERF_LABELS_PLACEHOLDER/${perf_labels}/g" "${html_file}"
+    sed -i '' "s/PERF_THROUGHPUT_PLACEHOLDER/${perf_throughput}/g" "${html_file}"
+    
+    # 替换 HTML 报告中的占位符
     replace_html_placeholders "${html_file}"
     
     log_success "HTML 报告生成完成: ${html_file}"
@@ -440,12 +578,12 @@ replace_html_placeholders() {
     local results_file="${SESSION_DIR}/test_results.json"
     for test_type in unit tools functional performance memory stress; do
         local category_status=$(get_category_status_from_json "$results_file" "$test_type")
-        if [ "$category_status" != "not_run" ]; then
+        if [ "$category_status" != "not_run" ] && [ "$category_status" != "pending" ]; then
             total_tests=$((total_tests + 1))
             local overall_status=$(get_category_overall_status "$results_file" "$test_type")
-            if [ "$overall_status" = "pass" ]; then
+            if [ "$overall_status" = "PASS" ] || [ "$overall_status" = "pass" ]; then
                 passed_tests=$((passed_tests + 1))
-            elif [ "$overall_status" = "fail" ]; then
+            elif [ "$overall_status" = "FAIL" ] || [ "$overall_status" = "fail" ]; then
                 failed_tests=$((failed_tests + 1))
             fi
         fi
@@ -470,12 +608,68 @@ replace_html_placeholders() {
     
     # 计算执行时间
     local duration="未知"
-    if [ -f "${SESSION_DIR}/session_info.txt" ]; then
-        local start_time=$(grep "start_time=" "${SESSION_DIR}/session_info.txt" | cut -d'=' -f2)
-        if [ -n "${start_time}" ]; then
-            local current_time=$(date +%s)
-            local elapsed=$((current_time - start_time))
-            duration="${elapsed}秒"
+    local results_file="${SESSION_DIR}/test_results.json"
+    
+    if [ -f "${results_file}" ]; then
+        # 尝试从 JSON 读取 start_time
+        local start_time_iso=$(jq -r '.session_info.start_time // empty' "${results_file}" 2>/dev/null)
+        
+        # DEBUG
+        # echo "DEBUG: start_time_iso=${start_time_iso}" >> "${SESSION_DIR}/debug_time.log"
+        
+        if [ -n "${start_time_iso}" ]; then
+            local start_ts=0
+            local current_ts=$(date +%s)
+            
+            # 尝试转换为时间戳 (兼容 GNU date 和 BSD date)
+            if date --version >/dev/null 2>&1; then
+                # GNU date
+                start_ts=$(date -d "${start_time_iso}" +%s 2>/dev/null)
+            else
+                # BSD date (macOS) - 尝试解析 ISO 8601 格式
+                # 注意：ISO 8601 格式 2026-03-02T16:30:05+08:00
+                # 如果不带秒偏移量，尝试解析
+                start_ts=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "${start_time_iso}" +%s 2>/dev/null)
+                if [ -z "${start_ts}" ]; then
+                    # 尝试带时区偏移量的格式 (如 +08:00)
+                    # BSD date 的 %z 需要去掉冒号，如 +0800，而 ISO 8601 是 +08:00
+                    local clean_iso=$(echo "${start_time_iso}" | sed 's/\([-+][0-9][0-9]\):\([0-9][0-9]\)$/\1\2/')
+                    start_ts=$(date -j -f "%Y-%m-%dT%H:%M:%S%z" "${clean_iso}" +%s 2>/dev/null)
+                fi
+                if [ -z "${start_ts}" ]; then
+                    # 尝试其他常见格式
+                    start_ts=$(date -j -f "%Y-%m-%d %H:%M:%S" "${start_time_iso}" +%s 2>/dev/null)
+                fi
+            fi
+            
+            # DEBUG
+            # echo "DEBUG: start_ts=${start_ts}, current_ts=${current_ts}" >> "${SESSION_DIR}/debug_time.log"
+            
+            if [ -n "${start_ts}" ] && [ "${start_ts}" -gt 0 ]; then
+                local elapsed=$((current_ts - start_ts))
+                # 修正时区问题：如果时间差接近8小时（28800秒），可能是时区解析错误
+                # 如果误差在 8小时 +/- 10分钟内，且测试明显不应该跑那么久，尝试修正
+                if [ ${elapsed} -ge 28200 ] && [ ${elapsed} -le 29400 ]; then
+                     # echo "DEBUG: Detecting timezone offset issue (8h), correcting..." >> "${SESSION_DIR}/debug_time.log"
+                     elapsed=$((elapsed - 28800))
+                fi
+                
+                if [ ${elapsed} -lt 0 ]; then elapsed=0; fi
+                
+                # 格式化显示时间
+                if [ ${elapsed} -ge 3600 ]; then
+                    local hours=$((elapsed / 3600))
+                    local minutes=$(( (elapsed % 3600) / 60 ))
+                    local seconds=$((elapsed % 60))
+                    duration="${hours}小时${minutes}分${seconds}秒"
+                elif [ ${elapsed} -ge 60 ]; then
+                    local minutes=$((elapsed / 60))
+                    local seconds=$((elapsed % 60))
+                    duration="${minutes}分${seconds}秒"
+                else
+                    duration="${elapsed}秒"
+                fi
+            fi
         fi
     fi
     
@@ -573,7 +767,7 @@ generate_test_section_html() {
                             <div class=\"test-result ${result_class}\">${test_result}</div>
                         </div>"
             fi
-        done < <(echo "$tests_json" | jq -r 'to_entries[] | "\(.key):\(.value)"' 2>/dev/null)
+        done < <(echo "$tests_json" | jq -r 'to_entries[] | "\(.key):\(.value.result)"' 2>/dev/null)
         
         if [ -n "${details}" ]; then
             content="${content}${details}"
@@ -700,24 +894,77 @@ EOF
 
 # 收集会话信息
 collect_session_info() {
-    local session_file="${SESSION_DIR}/session_info.txt"
-    local start_time=""
-    local end_time=""
+    local results_file="${SESSION_DIR}/test_results.json"
+    local start_time="null"
+    local end_time="null"
     local status="unknown"
     
-    if [ -f "${session_file}" ]; then
-        start_time=$(grep "start_time=" "${session_file}" | cut -d'=' -f2)
-        end_time=$(grep "end_time=" "${session_file}" | cut -d'=' -f2)
-        status=$(grep "status=" "${session_file}" | cut -d'=' -f2)
+    if [ -f "${results_file}" ]; then
+        start_time=$(jq -r '.session_info.start_time // "null"' "${results_file}")
+        end_time=$(jq -r '.session_info.end_time // "null"' "${results_file}")
+        status=$(jq -r '.session_info.status // "unknown"' "${results_file}")
     fi
     
+    # 格式化时间为 JSON 字符串
+    local start_time_json="null"
+    if [ "${start_time}" != "null" ] && [ -n "${start_time}" ]; then
+        start_time_json="\"${start_time}\""
+    fi
+    
+    local end_time_json="null"
+    if [ "${end_time}" != "null" ] && [ -n "${end_time}" ]; then
+        end_time_json="\"${end_time}\""
+    fi
+    
+    # 计算 duration
+    local duration=0
+    if [ "${start_time}" != "null" ] && [ -n "${start_time}" ]; then
+        local start_ts=0
+        local end_ts=$(date +%s)
+        
+        # 解析开始时间
+         if date --version >/dev/null 2>&1; then
+             start_ts=$(date -d "${start_time}" +%s 2>/dev/null)
+         else
+             start_ts=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "${start_time}" +%s 2>/dev/null)
+             if [ -z "${start_ts}" ]; then
+                 local clean_iso=$(echo "${start_time}" | sed 's/\([-+][0-9][0-9]\):\([0-9][0-9]\)$/\1\2/')
+                 start_ts=$(date -j -f "%Y-%m-%dT%H:%M:%S%z" "${clean_iso}" +%s 2>/dev/null)
+             fi
+             if [ -z "${start_ts}" ]; then
+                 start_ts=$(date -j -f "%Y-%m-%d %H:%M:%S" "${start_time}" +%s 2>/dev/null)
+             fi
+         fi
+         
+         # 解析结束时间（如果有）
+         if [ "${end_time}" != "null" ] && [ -n "${end_time}" ]; then
+             if date --version >/dev/null 2>&1; then
+                 end_ts=$(date -d "${end_time}" +%s 2>/dev/null)
+             else
+                 end_ts=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "${end_time}" +%s 2>/dev/null)
+                 if [ -z "${end_ts}" ]; then
+                      local clean_iso=$(echo "${end_time}" | sed 's/\([-+][0-9][0-9]\):\([0-9][0-9]\)$/\1\2/')
+                      end_ts=$(date -j -f "%Y-%m-%dT%H:%M:%S%z" "${clean_iso}" +%s 2>/dev/null)
+                  fi
+                 if [ -z "${end_ts}" ]; then
+                     end_ts=$(date -j -f "%Y-%m-%d %H:%M:%S" "${end_time}" +%s 2>/dev/null)
+                 fi
+             fi
+         fi
+        
+        if [ -n "${start_ts}" ] && [ "${start_ts}" -gt 0 ] && [ -n "${end_ts}" ]; then
+            duration=$((end_ts - start_ts))
+            if [ ${duration} -lt 0 ]; then duration=0; fi
+        fi
+    fi
+
     cat << EOF
 {
   "session_id": "${TEST_SESSION_ID}",
-  "start_time": ${start_time:-null},
-  "end_time": ${end_time:-null},
+  "start_time": ${start_time_json},
+  "end_time": ${end_time_json},
   "status": "${status}",
-  "duration_seconds": $((${end_time:-$(date +%s)} - ${start_time:-$(date +%s)}))
+  "duration_seconds": ${duration}
 }
 EOF
 }

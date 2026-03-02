@@ -1,34 +1,23 @@
 package com.brianxiadong.lsmtree;
 
-import org.junit.After;
-import org.junit.Before;
 import org.junit.Test;
-import java.io.File;
 import java.io.IOException;
 import static org.junit.Assert.*;
 
 /**
  * LSM Tree 简化测试类
  * 测试LSM Tree的基本操作和刷盘功能
+ * 
+ * 使用 LSMTreeTestBase 提供的统一生命周期管理和工具方法
  */
-public class SimpleLSMTreeTest {
-    private LSMTree lsmTree;
-    private String testDir;
-
-    @Before
-    public void setUp() throws IOException {
-        testDir = "simple_test_" + System.currentTimeMillis();
-        lsmTree = new LSMTree(testDir, 10); // 小容量，容易触发刷盘
-    }
-
-    @After
-    public void tearDown() throws IOException {
-        if (lsmTree != null) {
-            lsmTree.close();
-        }
-
-        // 清理测试数据
-        deleteDirectory(new File(testDir));
+public class SimpleLSMTreeTest extends LSMTreeTestBase {
+    
+    /**
+     * 覆盖默认 MemTable 大小，使用较小的值以便快速触发刷盘
+     */
+    @Override
+    protected int getDefaultMemTableSize() {
+        return 10;
     }
 
     @Test
@@ -61,9 +50,7 @@ public class SimpleLSMTreeTest {
         log.start("测试手动刷盘后数据持久化");
         
         log.step("插入5条数据");
-        for (int i = 0; i < 5; i++) {
-            lsmTree.put("key" + i, "value" + i);
-        }
+        bulkInsert(0, 5);
         log.data("数据条数", 5);
 
         log.step("执行手动刷盘");
@@ -77,9 +64,7 @@ public class SimpleLSMTreeTest {
             if (("value" + i).equals(val)) found++;
         }
         log.data("成功读取条数", found);
-        for (int i = 0; i < 5; i++) {
-            assertEquals("value" + i, lsmTree.get("key" + i));
-        }
+        verifyDataRange(0, 5);
         log.assertSuccess("刷盘后数据完整");
         log.pass();
     }
@@ -90,9 +75,7 @@ public class SimpleLSMTreeTest {
         log.start("测试超过阈值时自动刷盘");
         
         log.step("插入15条数据（超过阈值10）");
-        for (int i = 0; i < 15; i++) {
-            lsmTree.put("key" + i, "value" + i);
-        }
+        bulkInsert(0, 15);
         log.data("数据条数", 15);
         log.data("MemTable阈值", 10);
 
@@ -103,26 +86,8 @@ public class SimpleLSMTreeTest {
             if (("value" + i).equals(val)) found++;
         }
         log.data("成功读取条数", found);
-        for (int i = 0; i < 15; i++) {
-            assertEquals("value" + i, lsmTree.get("key" + i));
-        }
+        verifyDataRange(0, 15);
         log.assertSuccess("自动刷盘后数据完整");
         log.pass();
-    }
-
-    private void deleteDirectory(File directory) {
-        if (directory.exists()) {
-            File[] files = directory.listFiles();
-            if (files != null) {
-                for (File file : files) {
-                    if (file.isDirectory()) {
-                        deleteDirectory(file);
-                    } else {
-                        file.delete();
-                    }
-                }
-            }
-            directory.delete();
-        }
     }
 }

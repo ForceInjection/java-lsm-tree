@@ -60,6 +60,10 @@ public class BenchmarkRunner {
         }
         
         public BenchmarkConfig(int numOperations, int keySize, int valueSize, String dataDir, long randomSeed, int threadCount) {
+            this(numOperations, keySize, valueSize, dataDir, randomSeed, threadCount, 1024 * 1024);
+        }
+
+        public BenchmarkConfig(int numOperations, int keySize, int valueSize, String dataDir, long randomSeed, int threadCount, int memTableSizeThreshold) {
             this.numOperations = numOperations;
             this.keySize = keySize;
             this.valueSize = valueSize;
@@ -71,7 +75,7 @@ public class BenchmarkRunner {
             this.concurrentOperations = numOperations / threadCount;
             
             // 性能参数
-            this.memTableSizeThreshold = 1024 * 1024; // 1MB
+            this.memTableSizeThreshold = memTableSizeThreshold;
             this.enableMemoryMonitoring = true;
             this.warmupOperations = Math.min(1000, numOperations / 10);
             
@@ -253,6 +257,7 @@ public class BenchmarkRunner {
         String dataDir = "./benchmark_data";
         long seed = System.currentTimeMillis();
         int threads = Runtime.getRuntime().availableProcessors();
+        int memTableThreshold = 1024 * 1024; // 默认1MB (实际为条目数)
         
         boolean onlyCacheBenchmark = false;
         // 解析命名参数
@@ -271,6 +276,8 @@ public class BenchmarkRunner {
                     seed = Long.parseLong(args[++i]);
                 } else if ("--threads".equals(arg) && i + 1 < args.length) {
                     threads = Integer.parseInt(args[++i]);
+                } else if ("--memtable-threshold".equals(arg) && i + 1 < args.length) {
+                    memTableThreshold = Integer.parseInt(args[++i]);
                 } else if ("--help".equals(arg) || "-h".equals(arg)) {
                     printUsage();
                     System.exit(0);
@@ -294,7 +301,7 @@ public class BenchmarkRunner {
             }
         }
         
-        BenchmarkConfig cfg = new BenchmarkConfig(numOps, keySize, valueSize, dataDir, seed, threads);
+        BenchmarkConfig cfg = new BenchmarkConfig(numOps, keySize, valueSize, dataDir, seed, threads, memTableThreshold);
         // 使用环境变量传递仅运行缓存基准标志（简化参数传递）
         if (onlyCacheBenchmark) {
             System.setProperty("lsm.benchmark.onlyCache", "true");
@@ -823,6 +830,7 @@ public class BenchmarkRunner {
         PerformanceStats stats = new PerformanceStats();
         
         try {
+            // 使用 reads 子目录
             lsmTree = createLSMTree("reads");
             
             // 首先写入测试数据
@@ -837,6 +845,10 @@ public class BenchmarkRunner {
                 lsmTree.put(key, value);
             }
             
+            // 确保数据已落盘，避免全部在MemTable中
+            lsmTree.flush();
+            System.out.println("数据准备完成，已强制刷盘");
+            
             // 预热
             performWarmup(lsmTree, "读取");
             
@@ -844,7 +856,16 @@ public class BenchmarkRunner {
             stats.start();
             Collections.shuffle(testKeys, random); // 随机化读取顺序
             
+            int count = 0;
+            int total = testKeys.size();
+            System.out.println("开始执行 " + total + " 次读取操作...");
+            
             for (String key : testKeys) {
+                count++;
+                if (count % 10000 == 0) {
+                    System.out.printf("进度: %d/%d (%.1f%%)%n", count, total, count * 100.0 / total);
+                }
+                
                 long startTime = System.nanoTime();
                 try {
                     String value = lsmTree.get(key);
@@ -1384,12 +1405,20 @@ public class BenchmarkRunner {
      */
     private LSMTree createLSMTree(String testName) throws IOException {
         String dataDir = config.dataDir + "/" + testName;
+        // 如果是绝对路径，则直接使用；否则基于config.dataDir
+        if (testName.startsWith("/")) {
+             dataDir = testName;
+        }
+        
         File dir = new File(dataDir);
         if (dir.exists()) {
             deleteDirectory(dir);
         }
-        dir.mkdirs();
+        if (!dir.mkdirs()) {
+            throw new IOException("无法创建测试数据目录: " + dataDir);
+        }
         
+        System.out.println("创建 LSM Tree，数据目录: " + dir.getAbsolutePath());
         return new LSMTree(dataDir, config.memTableSizeThreshold);
     }
     

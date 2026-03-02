@@ -469,15 +469,17 @@ has_incomplete_session() {
         return 1  # session目录或摘要文件不存在
     fi
     
-    # 检查session状态是否为running
+    # 检查session状态是否为running，或者是否是今天创建的会话
     local session_status=$(grep '"status"' "$summary_file" | cut -d'"' -f4)
-    if [[ "$session_status" == "running" ]]; then
+    local today=$(date +%Y%m%d)
+    
+    if [[ "$session_status" == "running" ]] || [[ "${session_id:0:8}" == "$today" ]]; then
         # 设置全局变量供其他函数使用
         EXISTING_SESSION_ID="$session_id"
-        return 0  # 存在未完成的session
+        return 0  # 存在未完成或今天的session
     fi
     
-    return 1  # session已完成
+    return 1  # session已完成且不是今天的
 }
 
 # 询问用户是否复用现有session
@@ -518,16 +520,16 @@ ask_user_session_choice() {
     echo "  2) 创建新会话 (开始一个全新的测试会话)"
     echo ""
     
-    echo "提示: 3秒内未选择将自动使用默认选项(2)"
+    echo "提示: 5秒内未选择将自动使用默认选项(1)"
     
     while true; do
-        read -p "请输入选择 (1 或 2) [默认:2]: " -t 3 -n 1 -r choice
+        read -p "请输入选择 (1 或 2) [默认:1]: " -t 5 -n 1 -r choice
         echo ""
         
-        # 如果超时或输入为空，使用默认值2
+        # 如果超时或输入为空，使用默认值1
         if [ $? -ne 0 ] || [ -z "$choice" ]; then
-            choice="2"
-            echo "超时或未输入，使用默认选项: 2"
+            choice="1"
+            echo "超时或未输入，使用默认选项: 1"
         fi
         
         case "$choice" in

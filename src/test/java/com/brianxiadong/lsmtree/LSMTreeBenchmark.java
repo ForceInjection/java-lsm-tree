@@ -1,7 +1,5 @@
 package com.brianxiadong.lsmtree;
 
-import org.junit.After;
-import org.junit.Before;
 import org.junit.Test;
 
 import java.io.File;
@@ -13,27 +11,30 @@ import java.util.Random;
 
 /**
  * LSM Tree 性能基准测试
+ * 
+ * 使用 LSMTreeTestBase 提供的统一生命周期管理和工具方法
+ * 覆盖 getDefaultMemTableSize() 以使用更大的 MemTable 减少刷盘频率
  */
-public class LSMTreeBenchmark {
-    private LSMTree lsmTree;
-    private String testDir;
+public class LSMTreeBenchmark extends LSMTreeTestBase {
+    
     private Random random;
-
-    @Before
-    public void setUp() throws IOException {
-        // 使用系统临时目录避免在项目根目录创建测试文件
-        String tempDir = System.getProperty("java.io.tmpdir");
-        testDir = tempDir + File.separator + "benchmark_" + System.currentTimeMillis();
-        lsmTree = new LSMTree(testDir, 10000); // 较大的MemTable以减少刷盘频率
-        random = new Random(42); // 固定种子确保结果可重现
+    
+    /**
+     * 使用较大的 MemTable 以减少刷盘频率，专注于性能测试
+     */
+    @Override
+    protected int getDefaultMemTableSize() {
+        return 10000;
     }
-
-    @After
-    public void tearDown() throws IOException {
-        if (lsmTree != null) {
-            lsmTree.close();
-        }
-        deleteDirectory(new File(testDir));
+    
+    /**
+     * 性能测试需要自定义数据目录（使用系统临时目录）
+     * 覆盖此方法以使用临时目录下的子目录
+     */
+    @Override
+    public void setUp() throws Exception {
+        super.setUp();
+        random = new Random(42); // 固定种子确保结果可重现
     }
 
     @Test
@@ -241,10 +242,15 @@ public class LSMTreeBenchmark {
     public void benchmarkMemTableFlushImpact() throws IOException {
         System.out.println("=== MemTable刷盘对性能的影响 ===");
 
+        // 创建独立的测试目录，避免干扰主测试
+        File smallMemTableDir = new File(testDataDir, "small_memtable_" + System.currentTimeMillis());
+        smallMemTableDir.mkdirs();
+        
         // 使用小的MemTable来频繁触发刷盘
-        LSMTree smallMemTableLSM = new LSMTree(testDir + "_small", 100);
+        LSMTree smallMemTableLSM = null;
 
         try {
+            smallMemTableLSM = new LSMTree(smallMemTableDir.getAbsolutePath(), 100);
             int testSize = 5000;
 
             // 测试会触发多次刷盘的性能
@@ -262,23 +268,9 @@ public class LSMTreeBenchmark {
             System.out.println("统计信息: " + smallMemTableLSM.getStats());
 
         } finally {
-            smallMemTableLSM.close();
-        }
-    }
-
-    private void deleteDirectory(File directory) {
-        if (directory.exists()) {
-            File[] files = directory.listFiles();
-            if (files != null) {
-                for (File file : files) {
-                    if (file.isDirectory()) {
-                        deleteDirectory(file);
-                    } else {
-                        file.delete();
-                    }
-                }
+            if (smallMemTableLSM != null) {
+                smallMemTableLSM.close();
             }
-            directory.delete();
         }
     }
 }

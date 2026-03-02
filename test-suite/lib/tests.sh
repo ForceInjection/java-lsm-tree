@@ -34,8 +34,11 @@ run_unit_tests() {
         -v "${PROJECT_ROOT}":/workspace \
         -v "${HOME}/.m2":/root/.m2 \
         -w /workspace \
+        -e LANG=C.UTF-8 \
+        -e LC_ALL=C.UTF-8 \
+        -e JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8" \
         maven:3.8.6-openjdk-8 \
-        bash -lc "mvn -q -T 1C -Dmaven.test.skip=false -DskipTests=false -DfailIfNoTests=false -DforkCount=1C -DreuseForks=true -DtrimStackTrace=true -Dtest.data.base.path=\"test-suite/results/sessions/${TEST_SESSION_ID}\" test jacoco:report" > "${unit_log}" 2>&1
+        bash -lc "export LANG=C.UTF-8 && export LC_ALL=C.UTF-8 && mvn -q -T 1C -Dproject.build.sourceEncoding=UTF-8 -Dproject.reporting.outputEncoding=UTF-8 -Dmaven.test.skip=false -DskipTests=false -DfailIfNoTests=false -DforkCount=1C -DreuseForks=true -DtrimStackTrace=true -Dtest.data.base.path=\"test-suite/results/sessions/${TEST_SESSION_ID}\" test jacoco:report" > "${unit_log}" 2>&1
     local exit_code=$?
     
     # 执行覆盖率门禁检查
@@ -74,7 +77,7 @@ run_tools_tests() {
         -v "${HOME}/.m2":/root/.m2 \
         -w /workspace \
         maven:3.8.6-openjdk-8 \
-        mvn -q -Dtest=com.brianxiadong.lsmtree.tools.* -DfailIfNoTests=false test > "${logf}" 2>&1
+        mvn -q "-Dtest=com.brianxiadong.lsmtree.tools.*" -DfailIfNoTests=false test > "${logf}" 2>&1
     local ec=$?
     if [ ${ec} -eq 0 ]; then
         record_test_result "$results_file" "tools" "maven_tools" "PASS"
@@ -215,7 +218,7 @@ run_performance_benchmarks() {
             -v "${HOME}/.m2":/root/.m2 \
             -w /workspace \
             maven:3.8.6-openjdk-8 \
-            bash -lc "timeout ${PERFORMANCE_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.BenchmarkRunner' -Dexec.args='--operations ${BENCHMARK_OPERATIONS} --threads ${BENCHMARK_THREADS} --key-size ${BENCHMARK_KEY_SIZE} --value-size ${BENCHMARK_VALUE_SIZE} --data-dir test-suite/results/sessions/${TEST_SESSION_ID}/performance/benchmark_data_round_${i}' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" 2>&1 | grep -v "\[WARNING\].*will linger\|\[WARNING\].*was interrupted\|\[WARNING\].*NOTE:.*thread\|\[WARNING\].*Couldn't destroy\|IllegalThreadStateException\|^\s\+at \|ThreadGroup.destroy\|exec.AbstractExec\|exec.daemon" >> "${results_file}"
+            bash -lc "timeout ${PERFORMANCE_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.BenchmarkRunner' -Dexec.args='--operations ${BENCHMARK_OPERATIONS} --threads ${BENCHMARK_THREADS} --key-size ${BENCHMARK_KEY_SIZE} --value-size ${BENCHMARK_VALUE_SIZE} --memtable-threshold ${BENCHMARK_MEMTABLE_THRESHOLD} --data-dir test-suite/results/sessions/${TEST_SESSION_ID}/performance/benchmark_data_round_${i}' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" 2>&1 | grep -v "\[WARNING\].*will linger\|\[WARNING\].*was interrupted\|\[WARNING\].*NOTE:.*thread\|\[WARNING\].*Couldn't destroy\|IllegalThreadStateException\|^\s\+at \|ThreadGroup.destroy\|exec.AbstractExec\|exec.daemon" >> "${results_file}"
         
         local exit_code=$?
         if [ ${exit_code} -eq 0 ]; then
@@ -232,21 +235,6 @@ run_performance_benchmarks() {
         # 短暂休息，避免系统过载
         sleep 2
     done
-    
-    # 追加：运行一次仅缓存对比基准测试（过滤线程警告噪音）
-    log_benchmark "运行缓存对比基准测试 (有缓存 vs 无缓存)..."
-    local cache_results_file="${SESSION_PERFORMANCE_DIR}/cache_benchmark_$(get_timestamp).txt"
-    docker run --rm \
-        -v "${PROJECT_ROOT}":/workspace \
-        -v "${HOME}/.m2":/root/.m2 \
-        -w /workspace \
-        maven:3.8.6-openjdk-8 \
-        bash -lc "timeout ${PERFORMANCE_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.BenchmarkRunner' -Dexec.args='--operations ${BENCHMARK_OPERATIONS} --threads ${BENCHMARK_THREADS} --key-size ${BENCHMARK_KEY_SIZE} --value-size ${BENCHMARK_VALUE_SIZE} --data-dir test-suite/results/sessions/${TEST_SESSION_ID}/performance/cache_only --only-cache-benchmark' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" 2>&1 | grep -v "\[WARNING\].*will linger\|\[WARNING\].*was interrupted\|\[WARNING\].*NOTE:.*thread\|\[WARNING\].*Couldn't destroy\|IllegalThreadStateException\|^\s\+at \|ThreadGroup.destroy\|exec.AbstractExec\|exec.daemon" >> "${cache_results_file}"
-    if [ $? -eq 0 ]; then
-        record_test_result "$test_results_file" "performance" "cache_vs_no_cache" "PASS"
-    else
-        record_test_result "$test_results_file" "performance" "cache_vs_no_cache" "FAIL"
-    fi
 
     # 生成性能测试汇总
     generate_performance_summary
@@ -274,7 +262,7 @@ run_cache_only_benchmark() {
         -v "${HOME}/.m2":/root/.m2 \
         -w /workspace \
         maven:3.8.6-openjdk-8 \
-        bash -lc "timeout ${PERFORMANCE_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.BenchmarkRunner' -Dexec.args='--operations ${BENCHMARK_OPERATIONS} --threads ${BENCHMARK_THREADS} --key-size ${BENCHMARK_KEY_SIZE} --value-size ${BENCHMARK_VALUE_SIZE} --data-dir test-suite/results/sessions/${TEST_SESSION_ID}/performance/cache_only --only-cache-benchmark' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" 2>&1 | grep -v "\[WARNING\].*will linger\|\[WARNING\].*was interrupted\|\[WARNING\].*NOTE:.*thread\|\[WARNING\].*Couldn't destroy\|IllegalThreadStateException\|^\s\+at \|ThreadGroup.destroy\|exec.AbstractExec\|exec.daemon" >> "${cache_results_file}"
+        bash -lc "timeout ${PERFORMANCE_TIMEOUT}s mvn exec:java -Dexec.mainClass='${MAIN_CLASS}.BenchmarkRunner' -Dexec.args='--operations ${BENCHMARK_OPERATIONS} --threads ${BENCHMARK_THREADS} --key-size ${BENCHMARK_KEY_SIZE} --value-size ${BENCHMARK_VALUE_SIZE} --memtable-threshold ${BENCHMARK_MEMTABLE_THRESHOLD} --data-dir test-suite/results/sessions/${TEST_SESSION_ID}/performance/cache_only --only-cache-benchmark' -Dexec.cleanupDaemonThreads=true -Dexec.daemonThreadJoinTimeout=2000 -Dexec.stopWait=2000" 2>&1 | grep -v "\[WARNING\].*will linger\|\[WARNING\].*was interrupted\|\[WARNING\].*NOTE:.*thread\|\[WARNING\].*Couldn't destroy\|IllegalThreadStateException\|^\s\+at \|ThreadGroup.destroy\|exec.AbstractExec\|exec.daemon" >> "${cache_results_file}"
     if [ $? -eq 0 ]; then
         record_test_result "$test_results_file" "performance" "cache_vs_no_cache" "PASS"
     else

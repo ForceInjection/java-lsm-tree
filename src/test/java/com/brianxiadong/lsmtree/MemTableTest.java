@@ -1,8 +1,6 @@
 package com.brianxiadong.lsmtree;
 
 import org.junit.Test;
-import org.junit.Before;
-import org.junit.After;
 import static org.junit.Assert.*;
 
 import java.util.List;
@@ -15,21 +13,23 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * MemTable 内存表测试类
  * 验证跳表实现、刷盘机制、并发性能和内存管理
+ * 
+ * 使用 ComponentTestBase 提供的统一生命周期管理
  */
-public class MemTableTest {
+public class MemTableTest extends ComponentTestBase {
 
     private MemTable memTable;
     private static final int DEFAULT_MAX_SIZE = 100;
-    private TestLogger log;
 
-    @Before
-    public void setUp() {
+    @Override
+    public void setUp() throws Exception {
+        super.setUp();
         memTable = new MemTable(DEFAULT_MAX_SIZE);
-        System.out.println("\n初始化MemTable: maxSize=" + DEFAULT_MAX_SIZE);
+        System.out.println("初始化MemTable: maxSize=" + DEFAULT_MAX_SIZE);
     }
 
-    @After
-    public void tearDown() {
+    @Override
+    protected void cleanupResources() {
         memTable = null;
     }
 
@@ -38,27 +38,27 @@ public class MemTableTest {
      */
     @Test
     public void testBasicPutAndGet() {
-        log = new TestLogger("MemTable基本读写测试");
-        log.start("测试put和get基本操作");
+        logger = new TestLogger("MemTable基本读写测试");
+        logger.start("测试put和get基本操作");
         
-        log.step("写入key1=value1, key2=value2");
+        logger.step("写入key1=value1, key2=value2");
         memTable.put("key1", "value1");
         memTable.put("key2", "value2");
-        log.data("当前大小", memTable.size());
+        logger.data("当前大小", memTable.size());
 
         String v1 = memTable.get("key1");
         String v2 = memTable.get("key2");
-        log.step("读取并验证数据");
-        log.data("key1值", v1);
-        log.data("key2值", v2);
+        logger.step("读取并验证数据");
+        logger.data("key1值", v1);
+        logger.data("key2值", v2);
         assertEquals("value1", v1);
         assertEquals("value2", v2);
-        log.assertSuccess("读取的值与写入的一致");
+        logger.assertSuccess("读取的值与写入的一致");
         
         String missing = memTable.get("nonexistent");
-        log.data("不存在的key返回", missing);
+        logger.data("不存在的key返回", missing);
         assertNull(missing);
-        log.pass();
+        logger.pass();
     }
 
     /**
@@ -66,21 +66,21 @@ public class MemTableTest {
      */
     @Test
     public void testUpdate() {
-        log = new TestLogger("MemTable更新测试");
-        log.start("测试更新已存在的key");
+        logger = new TestLogger("MemTable更新测试");
+        logger.start("测试更新已存在的key");
         
-        log.step("写入key1=value1");
+        logger.step("写入key1=value1");
         memTable.put("key1", "value1");
-        log.data("初始值", memTable.get("key1"));
+        logger.data("初始值", memTable.get("key1"));
         assertEquals("value1", memTable.get("key1"));
 
-        log.step("更新key1=updated_value");
+        logger.step("更新key1=updated_value");
         memTable.put("key1", "updated_value");
-        log.data("更新后的值", memTable.get("key1"));
-        log.data("更新后大小", memTable.size());
+        logger.data("更新后的值", memTable.get("key1"));
+        logger.data("更新后大小", memTable.size());
         assertEquals("updated_value", memTable.get("key1"));
-        log.assertSuccess("更新操作正确覆盖了原值");
-        log.pass();
+        logger.assertSuccess("更新操作正确覆盖了原值");
+        logger.pass();
     }
 
     /**
@@ -88,20 +88,20 @@ public class MemTableTest {
      */
     @Test
     public void testDelete() {
-        log = new TestLogger("MemTable删除测试");
-        log.start("测试删除key操作");
+        logger = new TestLogger("MemTable删除测试");
+        logger.start("测试删除key操作");
         
-        log.step("写入并读取key1=value1");
+        logger.step("写入并读取key1=value1");
         memTable.put("key1", "value1");
-        log.data("删除前的值", memTable.get("key1"));
+        logger.data("删除前的值", memTable.get("key1"));
         assertEquals("value1", memTable.get("key1"));
 
-        log.step("删除key1");
+        logger.step("删除key1");
         memTable.delete("key1");
-        log.data("删除后的值", memTable.get("key1"));
+        logger.data("删除后的值", memTable.get("key1"));
         assertNull(memTable.get("key1"));
-        log.assertSuccess("删除后key返回null");
-        log.pass();
+        logger.assertSuccess("删除后key返回null");
+        logger.pass();
     }
 
     /**
@@ -109,17 +109,19 @@ public class MemTableTest {
      */
     @Test
     public void testDeleteAndReinsert() {
-        log = new TestLogger("删除后重新插入测试");
-        log.start("测试删除后重新插入数据");
+        logger = new TestLogger("删除后重新插入测试");
+        logger.start("测试删除后重新插入数据");
         
-        log.step("写入并删除key1");
+        logger.step("写入并删除key1");
         memTable.put("key1", "value1");
         memTable.delete("key1");
-        log.data("删除后的值", memTable.get("key1"));
+        logger.data("删除后的值", memTable.get("key1"));
         assertNull(memTable.get("key1"));
 
         memTable.put("key1", "new_value");
         assertEquals("new_value", memTable.get("key1"));
+        logger.assertSuccess("删除后重新插入成功");
+        logger.pass();
     }
 
     /**
@@ -131,7 +133,7 @@ public class MemTableTest {
 
         // 插入数据直到接近刷盘阈值
         for (int i = 0; i < DEFAULT_MAX_SIZE - 1; i++) {
-            memTable.put("key" + i, "value" + i);
+            memTable.put(key(i), value(i));
         }
         assertFalse(memTable.shouldFlush());
 
@@ -254,17 +256,15 @@ public class MemTableTest {
     public void testLargeDataSet() {
         int dataSize = 1000;
         
-        long startTime = System.nanoTime();
-        for (int i = 0; i < dataSize; i++) {
-            memTable.put("key" + i, "value" + i);
-        }
-        long endTime = System.nanoTime();
+        long durationMs = measureTimeNanos("大数据量插入", () -> {
+            for (int i = 0; i < dataSize; i++) {
+                memTable.put(key(i), value(i));
+            }
+        }) / 1_000_000;
         
-        double durationMs = (endTime - startTime) / 1_000_000.0;
-        double throughput = dataSize / (durationMs / 1000.0);
+        double throughput = calculateThroughput(dataSize, durationMs);
         
-        System.out.printf("插入 %d 条数据 - 耗时: %.2f ms | 吞吐量: %.0f ops/sec%n", 
-                         dataSize, durationMs, throughput);
+        System.out.printf("插入 %d 条数据 - 吞吐量: %.0f ops/sec%n", dataSize, throughput);
         
         assertEquals(dataSize, memTable.size());
         
@@ -409,7 +409,7 @@ public class MemTableTest {
             
             long startTime = System.nanoTime();
             for (int i = 0; i < testOperations; i++) {
-                testTable.put("key" + i, "value" + i);
+                testTable.put(key(i), value(i));
             }
             long endTime = System.nanoTime();
             
