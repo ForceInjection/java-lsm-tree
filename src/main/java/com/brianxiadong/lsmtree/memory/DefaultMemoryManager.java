@@ -65,7 +65,9 @@ public class DefaultMemoryManager implements MemoryManager {
         ObjectPool<?> pool = objectPools.get(clazz);
         if (pool != null) {
             try {
-                ((ObjectPool<Object>) pool).returnObject(obj);
+                @SuppressWarnings("unchecked")
+                ObjectPool<Object> objPool = (ObjectPool<Object>) pool;
+                objPool.returnObject(obj);
             } catch (Exception e) {
                 // 如果归还不成功，就让GC处理
             }

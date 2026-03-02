@@ -6,7 +6,6 @@ import org.junit.Rule;
 import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
-import java.io.IOException;
 
 /**
  * 组件测试基类
@@ -18,24 +17,24 @@ import java.io.IOException;
  * - LSMTreeTestBase 用于测试完整的 LSMTree 功能
  */
 public abstract class ComponentTestBase {
-    
+
     /**
      * JUnit 临时文件夹规则
      * 自动创建和清理测试目录
      */
     @Rule
     public TemporaryFolder tempFolder = new TemporaryFolder();
-    
+
     /**
      * 测试数据目录
      */
     protected File testDataDir;
-    
+
     /**
      * 测试日志记录器
      */
     protected TestLogger logger;
-    
+
     /**
      * 测试前初始化
      * 创建临时目录
@@ -44,13 +43,13 @@ public abstract class ComponentTestBase {
     public void setUp() throws Exception {
         // 创建临时测试目录
         testDataDir = tempFolder.newFolder(getTestDirName());
-        
+
         // 初始化日志记录器
         logger = new TestLogger(getClass().getSimpleName());
-        
+
         System.out.println("\n初始化组件测试环境: 目录=" + testDataDir.getAbsolutePath());
     }
-    
+
     /**
      * 获取测试目录名称
      * 子类可以覆盖此方法自定义目录名
@@ -60,7 +59,7 @@ public abstract class ComponentTestBase {
     protected String getTestDirName() {
         return "component_test_" + System.currentTimeMillis();
     }
-    
+
     /**
      * 测试后清理
      */
@@ -69,7 +68,7 @@ public abstract class ComponentTestBase {
         cleanupResources();
         System.out.println("清理组件测试环境完成");
     }
-    
+
     /**
      * 清理资源
      * 子类可以覆盖此方法执行自定义清理
@@ -77,9 +76,9 @@ public abstract class ComponentTestBase {
     protected void cleanupResources() {
         // 子类可以覆盖此方法执行自定义清理
     }
-    
+
     // ==================== 常用工具方法 ====================
-    
+
     /**
      * 获取测试数据目录路径
      * 
@@ -88,7 +87,7 @@ public abstract class ComponentTestBase {
     protected String getTestDataDir() {
         return testDataDir.getAbsolutePath();
     }
-    
+
     /**
      * 在测试目录中创建子目录
      * 
@@ -100,7 +99,7 @@ public abstract class ComponentTestBase {
         subDir.mkdirs();
         return subDir;
     }
-    
+
     /**
      * 在测试目录中创建文件
      * 
@@ -110,12 +109,12 @@ public abstract class ComponentTestBase {
     protected File createFile(String fileName) {
         return new File(testDataDir, fileName);
     }
-    
+
     /**
      * 测量操作执行时间
      * 
      * @param operation 操作名称
-     * @param runnable 要执行的操作
+     * @param runnable  要执行的操作
      * @return 执行时间（毫秒）
      */
     protected long measureTime(String operation, Runnable runnable) {
@@ -125,12 +124,12 @@ public abstract class ComponentTestBase {
         System.out.println("操作 [" + operation + "] 耗时: " + duration + "ms");
         return duration;
     }
-    
+
     /**
      * 测量操作执行时间（纳秒级）
      * 
      * @param operation 操作名称
-     * @param runnable 要执行的操作
+     * @param runnable  要执行的操作
      * @return 执行时间（纳秒）
      */
     protected long measureTimeNanos(String operation, Runnable runnable) {
@@ -140,7 +139,7 @@ public abstract class ComponentTestBase {
         System.out.printf("操作 [%s] 耗时: %.2f ms%n", operation, duration / 1_000_000.0);
         return duration;
     }
-    
+
     /**
      * 生成测试用的 key
      * 
@@ -150,7 +149,7 @@ public abstract class ComponentTestBase {
     protected String key(int index) {
         return "key" + index;
     }
-    
+
     /**
      * 生成测试用的 value
      * 
@@ -160,29 +159,29 @@ public abstract class ComponentTestBase {
     protected String value(int index) {
         return "value" + index;
     }
-    
+
     /**
      * 生成带前缀的测试用的 key
      * 
      * @param prefix 前缀
-     * @param index 索引
+     * @param index  索引
      * @return key 字符串
      */
     protected String key(String prefix, int index) {
         return prefix + index;
     }
-    
+
     /**
      * 生成带前缀的测试用的 value
      * 
      * @param prefix 前缀
-     * @param index 索引
+     * @param index  索引
      * @return value 字符串
      */
     protected String value(String prefix, int index) {
         return prefix + index;
     }
-    
+
     /**
      * 计算吞吐量
      * 
@@ -196,11 +195,11 @@ public abstract class ComponentTestBase {
         }
         return operations / (durationMs / 1000.0);
     }
-    
+
     /**
      * 打印性能统计
      * 
-     * @param operation 操作名称
+     * @param operation  操作名称
      * @param operations 操作数量
      * @param durationMs 耗时（毫秒）
      */
