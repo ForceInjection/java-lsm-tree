@@ -86,7 +86,6 @@ java-lsm-tree/
 │   │   │   ├── ObjectPool.java           # 对象池接口
 │   │   │   ├── GenericObjectPool.java    # 通用对象池实现
 │   │   │   ├── PoolStats.java            # 对象池统计
-│   │   │   ├── OptimizedMemTable.java    # 优化版内存表
 │   │   │   ├── MemoryOptimizationTest.java # 内存优化测试运行器
 │   │   │   └── GCConfig.java             # GC 配置
 │   │   └── tools/                        # 工具类
@@ -95,7 +94,7 @@ java-lsm-tree/
 │   │       ├── WALAnalyzer.java          # WAL 分析器
 │   │       ├── WALAnalyzerCLI.java       # WAL 分析器 CLI
 │   │       └── RangeBenchmarkRunner.java # 范围查询基准测试工具
-│   └── test/java/com/brianxiadong/lsmtree/    # 测试代码（51+ 测试类）
+│   └── test/java/com/brianxiadong/lsmtree/    # 测试代码（63+ 测试类）
 │       ├── LSMTreeTest.java              # 核心功能测试
 │       ├── MemTableTest.java             # 内存表测试
 │       ├── WriteAheadLogTest.java        # WAL 测试
@@ -292,7 +291,7 @@ public void put(String key, String value) throws IOException {
 
 ### 测试结构
 
-项目包含 51+ 个测试类，每个测试类独立管理自己的生命周期：
+项目包含 63+ 个测试类，每个测试类独立管理自己的生命周期：
 
 ```text
 src/test/java/com/brianxiadong/lsmtree/
@@ -407,7 +406,6 @@ lsmTree.setCacheManager(cacheManager);
 
 ### 内存优化
 
-- 使用 `OptimizedMemTable` 替代标准 `MemTable` 以获得更好的内存效率
 - 配置 `DirectMemoryManager` 使用堆外内存
 - 使用 `GenericObjectPool` 复用频繁创建的对象
 
@@ -456,10 +454,29 @@ curl http://localhost:9090/metrics
 
 ## 参考资料
 
+### 项目概览与核心原理
+
 - [README.md](README.md) - 项目完整说明
 - [docs/02-lsm-tree-deep-dive.md](docs/02-lsm-tree-deep-dive.md) - LSM Tree 深度解析
-- [docs/06-benchmark-guide.md](docs/06-benchmark-guide.md) - 性能基准测试指南
-- [tutorials/advanced/production-readiness-analysis.md](tutorials/advanced/production-readiness-analysis.md) - 生产就绪性分析（关键）
-- [docs/05-test-suite-guide.md](docs/05-test-suite-guide.md) - 测试套件使用说明
-- [tutorials/advanced/memory-optimization-guide.md](tutorials/advanced/memory-optimization-guide.md) - 内存优化指南
+
+### 开发与学习指南
+
+- [tutorials/advanced/learning-plan.md](tutorials/advanced/learning-plan.md) - 学习计划
 - [tutorials/](tutorials/) - 详细实现教程（8 篇）
+- [tutorials/advanced/advanced-tasks.md](tutorials/advanced/advanced-tasks.md) - 高级任务清单
+
+### 测试与性能分析
+
+- [docs/05-test-suite-guide.md](docs/05-test-suite-guide.md) - 测试套件使用说明
+- [docs/06-benchmark-guide.md](docs/06-benchmark-guide.md) - 性能基准测试指南
+- [docs/07-performance-analysis-guide.md](docs/07-performance-analysis-guide.md) - 性能分析指南
+
+### 工具使用指南
+
+- [docs/08-db-analyzer-guide.md](docs/08-db-analyzer-guide.md) - SSTable 分析工具指南
+- [docs/09-wal-analyzer-guide.md](docs/09-wal-analyzer-guide.md) - WAL 分析工具指南
+
+### 高级主题与优化
+
+- [tutorials/advanced/production-readiness-analysis.md](tutorials/advanced/production-readiness-analysis.md) - 生产就绪性分析（关键）
+- [tutorials/advanced/memory-optimization-guide.md](tutorials/advanced/memory-optimization-guide.md) - 内存优化指南
