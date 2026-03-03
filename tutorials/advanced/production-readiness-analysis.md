@@ -10,7 +10,7 @@
 
 本项目作为一个教学性质的 LSM Tree 实现，为了保持代码的简洁性和可读性，在某些核心组件的设计上做出了权衡（Trade-offs）。特别是在 **SSTable 查询**和**数据压缩（Compaction）**两个方面，采用了最直观但非性能最优的实现方式。
 
-本文将重点分析 `SSTable.java` 和 `LeveledCompactionStrategy.java` 中的简化实现，并对比生产级系统（如 LevelDB, RocksDB）的解决方案。
+本文将重点分析 [SSTable.java](../../src/main/java/com/brianxiadong/lsmtree/SSTable.java) 和 [LeveledCompactionStrategy.java](../../src/main/java/com/brianxiadong/lsmtree/LeveledCompactionStrategy.java) 中的简化实现，并对比生产级系统（如 LevelDB, RocksDB）的解决方案。
 
 ---
 
@@ -18,9 +18,9 @@
 
 ### 2.1 当前实现 (SSTable.java)
 
-当前 `SSTable.java` 的 `get(String key)` 方法采用的是**线性扫描**策略，虽然结合了布隆过滤器（Bloom Filter）进行快速否定，但一旦布隆过滤器判断"可能存在"，就需要读取文件并从头开始扫描。
+当前 [SSTable.java](../../src/main/java/com/brianxiadong/lsmtree/SSTable.java) 的 `get(String key)` 方法采用的是**线性扫描**策略，虽然结合了布隆过滤器（Bloom Filter）进行快速否定，但一旦布隆过滤器判断"可能存在"，就需要读取文件并从头开始扫描。
 
-**代码片段分析** (`SSTable.java`):
+**代码片段分析** ([SSTable.java](../../src/main/java/com/brianxiadong/lsmtree/SSTable.java)):
 
 ```java
 public String get(String key) {
@@ -99,7 +99,7 @@ public String getOptimized(String key) {
 
 当前 `compactLevel` 方法采用了**全量加载**的方式，将所有待合并的 SSTable 数据一次性读入内存，排序后再写出。
 
-**代码片段分析** (`LeveledCompactionStrategy.java`):
+**代码片段分析** ([LeveledCompactionStrategy.java](../../src/main/java/com/brianxiadong/lsmtree/LeveledCompactionStrategy.java)):
 
 ```java
 private List<SSTable> compactLevel(List<SSTable> tables, int targetLevel) {
@@ -204,4 +204,4 @@ public void compactLevelStreamed(List<SSTable> tables, Writer writer) {
 | **合并 (Compaction)** | 全量内存加载   | **多路流式归并 (K-way Merge)**        | 内存占用 O(DataSize) vs O(1)      |
 | **WAL**               | 文本格式       | **二进制/Protobuf + CRC 校验**        | 解析速度与数据完整性              |
 
-在完成 `advanced-tasks.md` 中的 **T1 (Range Query)** 和 **T3 (Advanced Compaction)** 时，强烈建议尝试实现上述的生产级方案，这将显著提升系统的性能上限和稳定性。
+在完成 [advanced-tasks.md](advanced-tasks.md) 中的 **T1 (Range Query)** 和 **T3 (Advanced Compaction)** 时，强烈建议尝试实现上述的生产级方案，这将显著提升系统的性能上限和稳定性。

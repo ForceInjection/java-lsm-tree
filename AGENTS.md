@@ -198,7 +198,7 @@ mvn test -Dtest=LSMTreeTest,RangeQueryTest
 
 ### 测试套件（推荐）
 
-本项目提供了一个综合测试套件 `test-suite/test-suite.sh`，集成了单元测试、功能测试、性能测试和压力测试。
+本项目提供了一个综合测试套件 [test-suite/test-suite.sh](test-suite/test-suite.sh)，集成了单元测试、功能测试、性能测试和压力测试。
 
 **基本用法**:
 

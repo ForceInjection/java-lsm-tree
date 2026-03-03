@@ -677,7 +677,7 @@ mvn exec:java -Dexec.mainClass='com.brianxiadong.lsmtree.LSMTreeExample' \
 
 11.2 启动 Prometheus 采集
 
-使用示例配置文件：`examples/monitoring/prometheus.yml`。
+使用示例配置文件：[../examples/monitoring/prometheus.yml](../examples/monitoring/prometheus.yml)。
 
 ```bash
 docker run --rm -p 9090:9090 \
@@ -685,7 +685,7 @@ docker run --rm -p 9090:9090 \
   prom/prometheus --config.file=/etc/prometheus/prometheus.yml
 ```
 
-可选：加载告警规则 `examples/monitoring/alerts.yml` 并配合 Alertmanager 使用。
+可选：加载告警规则 [../examples/monitoring/alerts.yml](../examples/monitoring/alerts.yml) 并配合 Alertmanager 使用。
 
 11.3 启动 Grafana 并导入仪表盘
 

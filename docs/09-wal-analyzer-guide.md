@@ -77,7 +77,7 @@ PUT|config:timeout|30000|1698123456792
 
 ### 5.1 命令行接口
 
-工具通过 `analyze-wal.sh` 脚本启动，内部调用 `WALAnalyzerCLI` 主类：
+工具通过 [../analyze-wal.sh](../analyze-wal.sh) 脚本启动，内部调用 `WALAnalyzerCLI` 主类：
 
 ```bash
 ./analyze-wal.sh <COMMAND> [OPTIONS] [ARGUMENTS]
@@ -556,7 +556,7 @@ fi
 #### 7.4.1 环境检查
 
 - [ ] Java 版本兼容性（推荐 JDK 8+）
-- [ ] 项目构建状态（`./build.sh` 成功执行）
+- [ ] 项目构建状态（[../build.sh](../build.sh) 成功执行）
 - [ ] 文件系统权限（读取权限）
 - [ ] 磁盘空间充足（临时文件和输出文件）
 
@@ -569,7 +569,7 @@ fi
 
 #### 7.4.3 工具检查
 
-- [ ] `analyze-wal.sh` 脚本可执行
+- [ ] [../analyze-wal.sh](../analyze-wal.sh) 脚本可执行
 - [ ] Java 类路径配置正确
 - [ ] 依赖库完整
 - [ ] 输出目录可写
