@@ -1,47 +1,39 @@
-🔥 推荐一个高质量的Java LSM Tree开源项目！
-[https://github.com/brianxiadong/java-lsm-tree](https://github.com/brianxiadong/java-lsm-tree)
-**java-lsm-tree** 是一个从零实现的Log-Structured Merge Tree，专为高并发写入场景设计。
-核心亮点：
-⚡ 极致性能：写入速度超过40万ops/秒，完爆传统B+树
-🏗️ 完整架构：MemTable跳表 + SSTable + WAL + 布隆过滤器 + 多级压缩
-📚 深度教程：12章详细教程，从基础概念到生产优化，每行代码都有注释
-🔒 并发安全：读写锁机制，支持高并发场景
-💾 数据可靠：WAL写前日志确保崩溃恢复，零数据丢失
-适合谁？
-- 想深入理解LSM Tree原理的开发者
-- 需要高写入性能存储引擎的项目
-- 准备数据库/存储系统面试的同学
-- 对分布式存储感兴趣的工程师
-⭐ 给个Star支持开源！
-
 # 第3章：MemTable 内存表
 
-## 什么是MemTable？
+## 1. 什么是 MemTable？
 
-**MemTable (内存表)** 是LSM Tree中接收所有写入操作的内存数据结构。它扮演着缓冲区的角色，将随机写入转换为顺序写入，是LSM Tree高性能的关键组件。
+**MemTable (内存表)** 是 LSM Tree 中驻留在内存中的数据结构，它扮演着"写入缓冲区"和"排序缓冲区"的双重角色。
 
-## 为什么选择跳表？
+所有新的写入操作（PUT/DELETE）首先都会进入 MemTable。当 MemTable 达到预设的容量阈值（如 64MB）时，它会被冻结并转换为 **Immutable MemTable**，随后由后台线程刷新到磁盘生成 SSTable。
 
-在LSM Tree的MemTable实现中，我们选择了**跳表 (Skip List)** 作为底层数据结构。让我们看看为什么：
+> **核心作用**: MemTable 将来自客户端的随机写入请求在内存中进行排序，从而将后续的磁盘写入操作转换为高性能的顺序写 (Sequential Write)。
 
-### 数据结构对比
+---
 
-| 数据结构 | 插入 | 查找 | 删除 | 有序遍历 | 并发性能 |
-|----------|------|------|------|----------|----------|
-| 红黑树   | O(log n) | O(log n) | O(log n) | O(n) | 需要复杂锁 |
-| B+树     | O(log n) | O(log n) | O(log n) | O(n) | 锁开销大 |
-| **跳表** | **O(log n)** | **O(log n)** | **O(log n)** | **O(n)** | **并发友好** |
+## 2. 为什么选择跳表？
 
-### 跳表的优势
+在 LSM Tree 的 MemTable 实现中，我们选择了**跳表 (Skip List)** 作为底层数据结构，而不是红黑树或 AVL 树。这并非偶然，而是基于工程实现的深思熟虑。
 
-1. **并发友好**: Java的`ConcurrentSkipListMap`提供了优秀的并发性能
-2. **实现简单**: 相比红黑树，跳表实现更简单
-3. **缓存友好**: 较好的空间局部性
-4. **有序性**: 天然支持有序遍历
+### 2.1 数据结构对比
 
-## MemTable 实现分析
+| 数据结构             | 插入性能     | 查找性能     | 范围查询 | 并发实现难度                               | 空间利用率      |
+| :------------------- | :----------- | :----------- | :------- | :----------------------------------------- | :-------------- |
+| **红黑树 (RB-Tree)** | O(log N)     | O(log N)     | O(N)     | **极难**：旋转操作涉及多个节点，锁竞争严重 | 高              |
+| **B+ 树**            | O(log N)     | O(log N)     | O(N)     | **中等**：虽然有锁优化，但页分裂仍需锁     | 一般            |
+| **跳表 (Skip List)** | **O(log N)** | **O(log N)** | **O(N)** | **简单**：基于 CAS 的无锁实现，局部性好    | 一般 (指针开销) |
 
-让我们深入分析MemTable的实现：
+### 2.2 跳表的优势
+
+1. **并发友好 (Lock-Free)**: 跳表的插入和删除操作只需要修改局部的指针，非常适合通过 CAS (Compare-And-Swap) 实现无锁并发。Java 的 `ConcurrentSkipListMap` 就是典范。
+2. **实现简单**: 相比于红黑树复杂的旋转和再平衡逻辑，跳表的算法更加直观，代码量通常只有红黑树的 1/3。
+3. **缓存友好**: 跳表的节点在内存中通常是分散的，这似乎对缓存不友好？但实际上，跳表的高层索引提供了很好的跨度，使得查找过程中的内存访问次数较少。
+4. **范围查询**: 跳表底层的链表天然有序，非常适合执行 Range Scan 操作。
+
+---
+
+## 3. MemTable 实现分析
+
+让我们深入分析 MemTable 的实现：
 
 ```java
 package com.brianxiadong.lsmtree;
@@ -51,272 +43,222 @@ import java.util.List;
 import java.util.ArrayList;
 
 public class MemTable {
-    // 使用并发跳表作为底层存储，键为String，值为KeyValue对象
+    /**
+     * 底层存储结构
+     * 使用 ConcurrentSkipListMap 保证线程安全和有序性
+     * Key: String (用户键)
+     * Value: KeyValue (封装了值、时间戳、删除标记的完整对象)
+     */
     private final ConcurrentSkipListMap<String, KeyValue> data;
-    // 最大容量阈值，超过此值将触发刷盘操作
+
+    // 最大容量阈值 (字节数)，超过此值将触发刷盘
     private final int maxSize;
-    // 当前大小，使用volatile确保多线程可见性
+
+    // 当前估算大小，使用 volatile 确保多线程可见性
+    // 注意：这里统计的是近似值，为了性能放弃了强一致的精确计数
     private volatile int currentSize;
 
-    // 构造函数：初始化MemTable
+    // 构造函数：初始化 MemTable
     public MemTable(int maxSize) {
-        this.data = new ConcurrentSkipListMap<>();  // 创建线程安全的跳表
-        this.maxSize = maxSize;                     // 设置最大容量
-        this.currentSize = 0;                       // 初始大小为0
+        this.data = new ConcurrentSkipListMap<>();
+        this.maxSize = maxSize;
+        this.currentSize = 0;
     }
-    
+
     // 核心方法...
 }
 ```
 
-**代码解释**: 这个MemTable类使用ConcurrentSkipListMap作为底层存储，它提供了线程安全的有序键值存储。`maxSize`字段控制何时触发刷盘操作，而`currentSize`使用volatile关键字确保在多线程环境下的可见性。
+**代码解释**:
 
-### 核心设计要点
-
-1. **ConcurrentSkipListMap**: Java并发包提供的线程安全跳表实现
-2. **volatile currentSize**: 确保大小检查的可见性
-3. **immutable maxSize**: 刷盘触发阈值
-
-## 跳表原理深入
-
-### 跳表结构图解
-
-```
-跳表查找12的真实路径演示:
-
-Level 3: [1]--------①水平-------->[17]---------> NULL
-          |                        (17>12停止)
-          |②下降
-          ↓
-Level 2: [1]---③水平--->[9]---④水平--->[17]-------> NULL
-                        |             (17>12停止)  
-                        |⑤下降到Level 1
-                        ↓
-Level 1: [1]-->[4]----->[9]------->[17]-->[25]---> NULL
-                        |⑥检查      (下个是17>12，无需水平移动)
-                        |⑦下降到Level 0  
-                        ↓
-Level 0: [1]-->[4]----->[9]--⑧找到-->[12🎯]-->[17]-->[25]---> NULL
-                                     (找到目标!)
-
-真实搜索路径: 1(L3) → 1(L2) → 9(L2) → 9(L1) → 9(L0) → 12(L0) ✓
-关键洞察: Level 1并未被"跳过"，而是在此处做了快速判断后继续下降
-跳表精髓: 通过多层索引快速"跳过"不必要的节点比较，而非跳过层级
-```
-
-**跳表结构说明**: 跳表通过多层索引实现快速查找。上层作为下层的"快速通道"，每个节点在多个层级上建立索引。查找时从顶层开始，利用稀疏索引快速逼近目标，然后逐层下降精确定位。
-
-**查找12的完整路径(按编号顺序)**:
-1. **①水平**: Level 3从1开始，向右到17 (17>12，停止水平移动)
-2. **②下降**: 从Level 3的1下降到Level 2的1  
-3. **③水平**: Level 2从1向右到9 (9<12，继续)
-4. **④水平**: Level 2从9向右到17 (17>12，停止水平移动)
-5. **⑤下降**: 从Level 2的9下降到Level 1的9
-6. **Level 1检查**: 在Level 1的9处，下一个节点是17 (17>12，无需水平移动)
-7. **继续下降**: 从Level 1的9下降到Level 0的9  
-8. **⑥找到**: Level 0从9向右到12🎯 (找到目标！)
-
-**为什么看起来"跳过"了Level 1？**
-- 实际上算法会**逐层检查每一层**，不会真的跳过
-- 在Level 1的节点9处，发现下一个节点是17>12，所以无需水平移动
-- 但算法仍然会**在Level 1停留并做判断**，然后继续下降
-- 这就是为什么跳表叫"Skip List"——它能"跳过"不必要的比较，而不是跳过层级
-
-### 查找过程
-
-1. **从最高层开始**: 从Level 3的头节点开始
-2. **水平移动**: 在当前层向右移动，直到下一个节点 > 目标值
-3. **向下移动**: 移动到下一层继续查找
-4. **重复过程**: 直到找到目标或到达Level 0
-
-**查找12的路径演示**:
-- Level 3: 1 → 17 (17>12，下降)
-- Level 2: 1 → 9 → 17 (17>12，下降) 
-- Level 1: 1 → 4 → 9 → 17 (17>12，下降)
-- Level 0: 1 → 4 → 9 → 12 ✓ (找到目标)
-
-```java
-// 跳表查找伪代码
-public KeyValue search(String key) {
-    Node current = head;  // 从头节点开始
-    
-    // 从最高层开始向下搜索
-    for (int level = maxLevel; level >= 0; level--) {
-        // 在当前层水平移动，寻找合适的位置
-        while (current.forward[level] != null &&                    // 下一个节点存在
-               current.forward[level].key.compareTo(key) < 0) {     // 且键值小于目标键
-            current = current.forward[level];                       // 移动到下一个节点
-        }
-    }
-    
-    // 移动到Level 0的下一个节点检查是否找到目标
-    current = current.forward[0];
-    if (current != null && current.key.equals(key)) {  // 找到目标键
-        return current.value;                           // 返回对应的值
-    }
-    return null;  // 未找到，返回null
-}
-```
-
-**代码解释**: 这个搜索算法体现了跳表的核心思想：通过多层索引快速定位。从最高层开始，每层都尽可能向右移动，然后向下到下一层继续搜索。这种"跳跃"式的搜索方式大大减少了比较次数。
-
-### 插入过程
-
-```java
-// 跳表插入伪代码
-public void insert(String key, KeyValue value) {
-    Node[] update = new Node[maxLevel + 1];  // 记录每层的插入位置
-    Node current = head;                     // 从头节点开始
-    
-    // 找到每一层的插入位置
-    for (int level = maxLevel; level >= 0; level--) {
-        // 在当前层找到插入位置的前驱节点
-        while (current.forward[level] != null && 
-               current.forward[level].key.compareTo(key) < 0) {
-            current = current.forward[level];       // 向右移动
-        }
-        update[level] = current;  // 记录该层的前驱节点
-    }
-    
-    // 随机决定新节点的层数（跳表的概率特性）
-    int newLevel = randomLevel();
-    Node newNode = new Node(key, value, newLevel);  // 创建新节点
-    
-    // 在每一层插入新节点
-    for (int level = 0; level <= newLevel; level++) {
-        newNode.forward[level] = update[level].forward[level];  // 新节点指向后继
-        update[level].forward[level] = newNode;                 // 前驱指向新节点
-    }
-}
-```
-
-**代码解释**: 插入操作分为两个阶段：首先找到各层的插入位置，然后执行实际插入。随机层数的选择是跳表的关键特性，它保证了跳表的平衡性。每个新节点都会在随机选择的多个层级上建立索引。
-
-## MemTable 核心操作
-
-### 1. 写入操作 (PUT)
-
-```java
-public void put(String key, String value) {
-    KeyValue kv = new KeyValue(key, value);  // 创建新的KeyValue对象
-    KeyValue oldValue = data.put(key, kv);   // 插入到跳表中，返回旧值
-    
-    // 只有新键才增加计数（更新操作不增加大小）
-    if (oldValue == null) {
-        currentSize++;  // 原子性地增加当前大小
-    }
-}
-```
-
-**代码解释**: 写入操作将键值对封装成KeyValue对象后插入跳表。通过检查返回的旧值，我们只对新键增加计数，确保currentSize准确反映MemTable中的唯一键数量。
-
-**性能分析**:
-- **时间复杂度**: O(log n)，其中n是MemTable中的键数量
-- **并发性能**: ConcurrentSkipListMap支持高并发写入
-- **原子性**: 单个put操作是原子的
-
-### 2. 读取操作 (GET)
-
-```java
-public String get(String key) {
-    KeyValue kv = data.get(key);        // 从跳表中获取KeyValue对象
-    if (kv == null || kv.isDeleted()) { // 检查是否存在或已被删除
-        return null;                    // 不存在或已删除，返回null
-    }
-    return kv.getValue();               // 返回实际的值
-}
-```
-
-**代码解释**: 读取操作首先从跳表中获取KeyValue对象，然后检查该对象是否存在以及是否为删除标记。这种设计统一处理了不存在的键和被逻辑删除的键。
-
-**性能分析**:
-- **时间复杂度**: O(log n)
-- **并发读取**: 支持多线程并发读取
-- **删除处理**: 自动处理墓碑标记
-
-### 3. 删除操作 (DELETE)
-
-```java
-public void delete(String key) {
-    KeyValue tombstone = KeyValue.createTombstone(key);  // 创建删除标记（墓碑）
-    KeyValue oldValue = data.put(key, tombstone);        // 将墓碑插入跳表
-    
-    // 只有新键才增加计数（即使是删除操作）
-    if (oldValue == null) {
-        currentSize++;  // 墓碑也占用空间，需要计入大小
-    }
-}
-```
-
-**代码解释**: 删除操作通过插入墓碑标记来实现，而不是物理删除。这保证了删除操作的持久性和可见性。注意即使是删除操作，如果是新键也会增加currentSize，因为墓碑同样占用内存空间。
-
-**删除策略**:
-- **逻辑删除**: 插入墓碑标记而非物理删除
-- **一致性**: 确保删除操作的可见性
-- **空间考虑**: 墓碑占用空间，需要压缩清理
-
-### 4. 刷盘检查
-
-```java
-public boolean shouldFlush() {
-    return currentSize >= maxSize;  // 当前大小超过阈值时需要刷盘
-}
-
-// 获取当前大小的方法
-public int size() {
-    return currentSize;  // 返回当前的键值对数量
-}
-```
-
-**代码解释**: 刷盘检查是LSM Tree中的关键操作。当MemTable大小超过阈值时，就需要将数据刷盘到SSTable文件中，为新的写入腾出内存空间。
-
-**刷盘触发**:
-- **大小阈值**: 超过maxSize时触发
-- **内存压力**: 系统内存不足时强制刷盘
-- **时间阈值**: 定期刷盘保证持久性
-
-## 并发控制深入
-
-### ConcurrentSkipListMap 并发机制
-
-```java
-// Java ConcurrentSkipListMap 的并发策略示例
-public class ConcurrentSkipListMap<K,V> {
-    
-    // 使用 CAS (Compare-And-Swap) 操作进行无锁更新
-    private boolean casNext(Node<K,V> cmp, Node<K,V> val) {
-        // 原子性地比较并交换指针，避免使用锁
-        return UNSAFE.compareAndSwapObject(this, nextOffset, cmp, val);
-    }
-    
-    // 无锁读取操作
-    public V get(Object key) {
-        return doGet(key);  // 执行无锁查找
-    }
-    
-    // 无锁写入（大部分情况下）
-    public V put(K key, V value) {
-        return doPut(key, value, false);  // 执行无锁插入
-    }
-}
-```
-
-**代码解释**: ConcurrentSkipListMap的高并发性能来源于其巧妙的无锁设计。它大量使用CAS操作来实现原子更新，避免了传统锁机制的开销。这使得读操作完全无锁，写操作在大多数情况下也能避免阻塞。
-
-
-## 小结
-
-MemTable是LSM Tree的核心组件，它通过以下特性实现了高性能：
-
-1. **跳表结构**: 提供O(log n)的操作性能和良好的并发性
-2. **并发安全**: ConcurrentSkipListMap确保线程安全
-3. **内存效率**: 紧凑的数据结构减少内存开销
-4. **有序性**: 支持高效的有序遍历和范围查询
+- `ConcurrentSkipListMap`: 这是 Java 标准库提供的高性能并发跳表实现。它保证了在多线程写入时的线程安全，且无需全局锁。
+- `volatile currentSize`: 在高并发写入时，我们需要快速判断是否需要刷盘。使用 `volatile` 变量进行计数是一种低开销的方案，虽然在高并发下可能存在轻微的计数偏差（"脏读"），但这对于触发刷盘阈值来说是可以接受的。
 
 ---
 
-## 思考题
+## 4. 跳表原理深入
 
-1. 为什么ConcurrentSkipListMap比ConcurrentHashMap更适合MemTable？
-2. 如何处理MemTable刷盘过程中的新写入？
-3. 跳表的随机层数如何影响性能？
+### 4.1 跳表结构图解
+
+跳表是一种概率型数据结构，本质上是**多层链表**。
+
+```text
+Level 3: [1]------------------------------------->[17]---------> NULL
+          |                                        |
+Level 2: [1]------------->[9]-------------------->[17]---------> NULL
+          |                |                        |
+Level 1: [1]------>[4]---->[9]---------->[12]---->[17]---------> NULL
+          |         |       |              |        |
+Level 0: [1]------>[4]---->[9]------>[10]->[12]---->[17]->[19]-> NULL
+```
+
+**查找路径 (Target = 12)**:
+
+1. **L3**: 1 -> 17 (17 > 12，过大，下沉到 L2)
+2. **L2**: 1 -> 9 -> 17 (17 > 12，过大，下沉到 L1)
+3. **L1**: 9 -> 12 (命中！或者继续下沉确认)
+
+**关键机制**:
+
+- **层级提升**: 当插入新节点时，通过抛硬币（随机函数）决定该节点是否"晋升"到上一层索引。晋升概率通常为 1/2 或 1/4。
+- **空间换时间**: 通过维护额外的索引指针，换取了 O(log N) 的查找效率。
+
+### 4.2 查找算法
+
+```java
+// 简化的跳表查找逻辑
+public KeyValue search(String key) {
+    Node current = head;
+
+    // 从最高层开始向下搜索
+    for (int level = maxLevel; level >= 0; level--) {
+        // 在当前层尽可能向右移动
+        while (current.forward[level] != null &&
+               current.forward[level].key.compareTo(key) < 0) {
+            current = current.forward[level];
+        }
+    }
+
+    // 此时 current 是小于 key 的最大节点
+    // 检查 level 0 的下一个节点
+    current = current.forward[0];
+    if (current != null && current.key.equals(key)) {
+        return current.value;
+    }
+    return null;
+}
+```
+
+### 4.3 插入算法与 CAS
+
+在并发环境下，插入操作是最复杂的。`ConcurrentSkipListMap` 使用 CAS (Compare-And-Swap) 来保证原子性。
+
+**CAS 插入流程**:
+
+1. 找到待插入位置的前驱节点 `pred` 和后继节点 `succ`。
+2. 创建新节点 `newNode`，令 `newNode.next = succ`。
+3. **CAS 操作**: 尝试将 `pred.next` 从 `succ` 修改为 `newNode`。
+   - 如果成功：插入完成。
+   - 如果失败（说明其他线程修改了 `pred.next`）：重新读取，重试步骤 1（自旋）。
+
+这种无锁设计避免了线程阻塞和上下文切换，在高并发场景下吞吐量极高。
+
+---
+
+## 5. MemTable 核心操作
+
+### 5.1 写入操作 (PUT)
+
+```java
+public void put(String key, String value) {
+    // 1. 封装数据：包含时间戳
+    KeyValue kv = new KeyValue(key, value);
+
+    // 2. 写入跳表：put 操作是原子的
+    // 如果 key 已存在，put 会覆盖旧值并返回旧对象
+    KeyValue oldValue = data.put(key, kv);
+
+    // 3. 更新容量计数
+    // 只有新增 key 时才增加计数？不完全是。
+    // 在实际生产系统中，应该计算 key+value 的字节大小增量
+    if (oldValue == null) {
+        currentSize += estimateSize(key, value);
+    } else {
+        // 如果是更新，增加的大小是新值与旧值的差额
+        currentSize += (estimateSize(key, value) - estimateSize(key, oldValue.getValue()));
+    }
+}
+```
+
+**注意**: 这里展示的 `currentSize` 更新逻辑进行了简化。在严格实现中，即使是覆盖写，也可能导致内存占用变化，因此需要精确计算字节数。
+
+### 5.2 读取操作 (GET)
+
+```java
+public String get(String key) {
+    // 从跳表中查找
+    KeyValue kv = data.get(key);
+
+    // 检查结果
+    if (kv == null) {
+        return null; // 内存表中没有
+    }
+
+    // 检查墓碑标记
+    if (kv.isDeleted()) {
+        return null; // 显式标记为删除，返回 null (屏蔽旧数据)
+    }
+
+    return kv.getValue();
+}
+```
+
+### 5.3 删除操作 (DELETE)
+
+```java
+public void delete(String key) {
+    // 创建墓碑：value 为 null，deleted = true
+    KeyValue tombstone = KeyValue.createTombstone(key);
+
+    // 将墓碑插入跳表，覆盖原有数据
+    KeyValue oldValue = data.put(key, tombstone);
+
+    // 墓碑本身也占用内存空间，需要计入
+    if (oldValue == null) {
+        currentSize += estimateSize(key, null);
+    }
+}
+```
+
+### 5.4 刷盘检查与冻结
+
+```java
+public boolean shouldFlush() {
+    return currentSize >= maxSize;
+}
+
+// 冻结操作：返回当前数据，并重置 MemTable（由上层调用者控制）
+// 实际上，通常是创建一个新的 MemTable 实例替换旧的
+```
+
+**刷盘流程**:
+
+1. **检查**: 每次写入后检查 `shouldFlush()`。
+2. **冻结**: 如果需要刷盘，将当前 `activeMemTable` 指针指向一个新的空 MemTable。
+3. **转换**: 旧的 `activeMemTable` 变为 `immutableMemTable`。
+4. **提交**: 将 `immutableMemTable` 提交给后台 Flush 线程。
+
+---
+
+## 6. 并发控制深入
+
+### 6.1 为什么不使用 synchronized?
+
+如果在 `put` 方法上加 `synchronized` 锁：
+
+- **优点**: 实现极其简单，绝对线程安全。
+- **缺点**: 所有写线程串行化。在多核 CPU 下，只有一个核在工作，其他线程都在阻塞等待，无法利用多核优势。
+
+### 6.2 CAS 的 ABA 问题
+
+在跳表实现中，CAS 可能会遇到 ABA 问题（值从 A 变 B 又变回 A，CAS 认为没变）。Java 的 `ConcurrentSkipListMap` 通过节点状态标记和版本号等机制解决了这个问题，使用者无需担心。
+
+---
+
+## 7. 小结
+
+MemTable 是 LSM Tree 高性能写入的基石：
+
+1. **写缓冲**: 吸收随机写，转化为批量写。
+2. **内存排序**: 利用跳表在内存中维护有序性，为磁盘顺序写做准备。
+3. **无锁并发**: 利用 CAS 机制支持高吞吐量的并发写入。
+
+---
+
+## 8. 思考题
+
+1. **内存开销**: 跳表维持多层索引指针，会带来多大的额外内存开销？相比于 B+ 树的页结构，谁的空间利用率更高？
+2. **动态调整**: 如果写入速度过快，导致 Immutable MemTable 来不及刷盘（内存爆满），系统应该如何进行流量控制 (Write Stall)？
+3. **替代方案**: 在某些极端的读多写少场景下，MemTable 是否可以用平衡树代替跳表以获得微小的读性能提升？
+
+**下一章预告**: 当 MemTable 满载后，数据将流向何方？我们将深入 SSTable 的磁盘存储结构。

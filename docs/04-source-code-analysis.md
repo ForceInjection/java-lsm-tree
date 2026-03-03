@@ -106,11 +106,11 @@ private final ConcurrentSkipListMap<String, KeyValue> data;
 
 #### 3.2.3 选择跳表的原因
 
-| 数据结构 | 插入 | 查找 | 删除 | 有序遍历 | 并发性能 |
-|----------|------|------|------|----------|----------|
-| 跳表     | O(log N) | O(log N) | O(log N) | O(N) | 优秀 |
-| 红黑树   | O(log N) | O(log N) | O(log N) | O(N) | 一般 |
-| 哈希表   | O(1) | O(1) | O(1) | 不支持 | 优秀 |
+| 数据结构 | 插入     | 查找     | 删除     | 有序遍历 | 并发性能 |
+| -------- | -------- | -------- | -------- | -------- | -------- |
+| 跳表     | O(log N) | O(log N) | O(log N) | O(N)     | 优秀     |
+| 红黑树   | O(log N) | O(log N) | O(log N) | O(N)     | 一般     |
+| 哈希表   | O(1)     | O(1)     | O(1)     | 不支持   | 优秀     |
 
 #### 3.2.4 核心方法
 
@@ -134,7 +134,7 @@ private final ConcurrentSkipListMap<String, KeyValue> data;
 ├─────────────────┤
 │   键 (UTF-8)    │
 │   删除标记 (1B)  │
-│   值 (UTF-8)    │  ← 重复 N 次
+│   值 (UTF-8)    │  ← 仅在未删除时存在
 │   时间戳 (8B)   │
 ├─────────────────┤
 │      ...        │
@@ -146,7 +146,7 @@ private final ConcurrentSkipListMap<String, KeyValue> data;
 - **不可变性**：一旦创建，文件内容不可修改
 - **有序性**：数据按键的字典序排列
 - **布隆过滤器**：每个 SSTable 都有对应的布隆过滤器
-- **压缩友好**：支持与其他 SSTable 合并
+- **压缩支持**：支持 LZ4 压缩和内存映射 (mmap) 读取
 
 #### 3.3.4 查询优化
 
@@ -156,9 +156,24 @@ public String get(String key) {
     if (!bloomFilter.mightContain(key)) {
         return null;  // 确定不存在
     }
-    
-    // 在文件中顺序搜索
-    // 由于数据有序，可以提前终止搜索
+
+    try (DataInputStream dis = openPayloadInput()) {
+        int totalEntries = dis.readInt();
+        // 顺序搜索所有条目
+        for (int i = 0; i < totalEntries; i++) {
+            String currentKey = dis.readUTF();
+            boolean deleted = dis.readBoolean();
+            String value = null;
+            if (!deleted) {
+                value = dis.readUTF();
+            }
+            // ...
+            if (currentKey.equals(key)) {
+                return deleted ? null : value;
+            }
+        }
+    }
+    return null;
 }
 ```
 
@@ -170,10 +185,10 @@ WAL 确保数据的持久性和崩溃恢复能力，是 LSM Tree 数据可靠性
 
 #### 3.4.2 日志格式
 
-| 操作类型 | 键 | 值 | 时间戳 |
-|----------|----|----|--------|
-| PUT | user:1 | Alice | 1640995200000 |
-| DELETE | user:2 |  | 1640995201000 |
+| 操作类型 | 键     | 值    | 时间戳        |
+| -------- | ------ | ----- | ------------- |
+| PUT      | user:1 | Alice | 1640995200000 |
+| DELETE   | user:2 |       | 1640995201000 |
 
 #### 3.4.3 核心操作
 
@@ -220,6 +235,18 @@ private int hash(String key, int i) {
     int hash2 = hash1 >>> 16;
     return hash1 + i * hash2;
 }
+
+/**
+ * 向布隆过滤器添加元素
+ */
+public void add(String key) {
+    for (int i = 0; i < hashFunctions; i++) {
+        int hash = hash(key, i);
+        // 使用 & 0x7FFFFFFF 确保结果为非负数
+        int index = (hash & 0x7FFFFFFF) % size;
+        bitSet.set(index);
+    }
+}
 ```
 
 ### 3.6 CompactionStrategy 类
@@ -239,7 +266,7 @@ private int hash(String key, int i) {
 
 ```text
 Level 0: [SSTable] [SSTable] [SSTable] [SSTable]  (4个文件时触发压缩)
-Level 1: [SSTable] [SSTable] ... (40个文件时触发压缩)  
+Level 1: [SSTable] [SSTable] ... (40个文件时触发压缩)
 Level 2: [SSTable] [SSTable] ... (400个文件时触发压缩)
 ```
 
@@ -249,7 +276,7 @@ Level 2: [SSTable] [SSTable] ... (400个文件时触发压缩)
 private List<KeyValue> mergeAndDedup(List<KeyValue> entries) {
     // 1. 按键和时间戳排序
     entries.sort(KeyValue::compareTo);
-    
+
     // 2. 保留每个键的最新版本
     Map<String, KeyValue> latestEntries = new HashMap<>();
     for (KeyValue entry : entries) {
@@ -259,7 +286,7 @@ private List<KeyValue> mergeAndDedup(List<KeyValue> entries) {
             latestEntries.put(key, entry);
         }
     }
-    
+
     // 3. 移除删除标记的过期条目
     List<KeyValue> dedupedEntries = new ArrayList<>();
     for (KeyValue entry : latestEntries.values()) {
@@ -267,7 +294,7 @@ private List<KeyValue> mergeAndDedup(List<KeyValue> entries) {
             dedupedEntries.add(entry);
         }
     }
-    
+
     return dedupedEntries;
 }
 ```
@@ -285,17 +312,19 @@ public class LSMTree implements AutoCloseable {
     // 内存组件
     private volatile MemTable activeMemTable;           // 活跃 MemTable
     private final List<MemTable> immutableMemTables;    // 不可变 MemTable 列表
-    
+
     // 磁盘组件
     private final List<SSTable> ssTables;               // SSTable 文件列表
-    
+
     // 后台任务
     private final ExecutorService compactionExecutor;   // 压缩线程池
     private final CompactionStrategy compactionStrategy; // 压缩策略
-    
+    private final CompressionStrategy compressionStrategy; // 压缩算法
+    private com.brianxiadong.lsmtree.cache.CacheManager cacheManager; // 缓存管理器
+
     // 持久化组件
     private final WriteAheadLog wal;                    // WAL 实例
-    
+
     // 并发控制
     private final ReadWriteLock lock;                   // 读写锁
 }
@@ -309,13 +338,18 @@ public void put(String key, String value) throws IOException {
     try {
         // 1. 写入 WAL
         wal.append(WriteAheadLog.LogEntry.put(key, value));
-        
+
         // 2. 写入活跃 MemTable
         activeMemTable.put(key, value);
-        
+
         // 3. 检查是否需要刷盘
         if (activeMemTable.shouldFlush()) {
             flushMemTable();
+        }
+
+        // 4. 更新缓存 (如果启用)
+        if (cacheManager != null) {
+            cacheManager.put(key, new KeyValue(key, value), CacheType.ROW);
         }
     } finally {
         lock.writeLock().unlock();
@@ -329,26 +363,32 @@ public void put(String key, String value) throws IOException {
 public String get(String key) {
     lock.readLock().lock();
     try {
-        // 1. 查询活跃 MemTable
+        // 1. 查询缓存 (如果启用)
+        if (cacheManager != null) {
+            Object obj = cacheManager.get(key, CacheType.ROW);
+            if (obj != null) return ((KeyValue) obj).getValue();
+        }
+
+        // 2. 查询活跃 MemTable
         String value = activeMemTable.get(key);
         if (value != null) return value;
-        
-        // 2. 查询不可变 MemTable（按时间倒序）
+
+        // 3. 查询不可变 MemTable（按时间倒序）
         for (int i = immutableMemTables.size() - 1; i >= 0; i--) {
             value = immutableMemTables.get(i).get(key);
             if (value != null) return value;
         }
-        
-        // 3. 查询 SSTable（按创建时间倒序）
+
+        // 4. 查询 SSTable（按创建时间倒序）
         List<SSTable> sortedSSTables = new ArrayList<>(ssTables);
-        sortedSSTables.sort((a, b) -> 
+        sortedSSTables.sort((a, b) ->
             Long.compare(b.getCreationTime(), a.getCreationTime()));
-        
+
         for (SSTable ssTable : sortedSSTables) {
             value = ssTable.get(key);
             if (value != null) return value;
         }
-        
+
         return null;
     } finally {
         lock.readLock().unlock();
@@ -388,8 +428,8 @@ Level 0: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8 -> 9
 
 #### 4.2.2 参数优化
 
-- **位数组大小**：m = -n * ln(p) / (ln(2))²
-- **哈希函数个数**：k = (m/n) * ln(2)
+- **位数组大小**：m = -n \* ln(p) / (ln(2))²
+- **哈希函数个数**：k = (m/n) \* ln(2)
 - **假阳性概率**：p = (1 - e^(-kn/m))^k
 
 其中 n 是预期元素数量，p 是期望的假阳性概率。
@@ -414,7 +454,7 @@ for (Iterator<KeyValue> iter : iterators) {
 while (!minHeap.isEmpty()) {
     KeyValue min = minHeap.poll();
     output.add(min);
-    
+
     // 添加下一个元素
     if (correspondingIterator.hasNext()) {
         minHeap.offer(correspondingIterator.next());
@@ -518,7 +558,7 @@ try {
 private void recover() throws IOException {
     // 1. 恢复 SSTable
     loadExistingSSTables();
-    
+
     // 2. 从 WAL 恢复未刷盘的数据
     List<WriteAheadLog.LogEntry> entries = wal.recover();
     for (WriteAheadLog.LogEntry entry : entries) {
@@ -549,21 +589,21 @@ private void recover() throws IOException {
 ```java
 // 创建 LSM Tree 实例
 try (LSMTree lsmTree = new LSMTree("data", 1000)) {
-    
+
     // 插入数据
     lsmTree.put("user:1", "Alice");
     lsmTree.put("user:2", "Bob");
-    
+
     // 查询数据
     String value = lsmTree.get("user:1");
     System.out.println("user:1 = " + value);
-    
+
     // 更新数据
     lsmTree.put("user:1", "Alice Updated");
-    
+
     // 删除数据
     lsmTree.delete("user:2");
-    
+
     // 强制刷盘
     lsmTree.flush();
 }

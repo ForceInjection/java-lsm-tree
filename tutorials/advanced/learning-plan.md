@@ -17,14 +17,14 @@
 
 #### 3.1.1 理论学习 (1-2 小时)
 
-- 阅读 [docs/lsm-tree-intro.md](../docs/lsm-tree-intro.md) 第 1-3 章
-- 阅读 [tutorials/01-lsm-tree-overview.md](../tutorials/01-lsm-tree-overview.md)
+- 阅读 [docs/01-lsm-tree-intro.md](../../docs/01-lsm-tree-intro.md) 第 1-3 章
+- 阅读 [tutorials/01-lsm-tree-overview.md](../01-lsm-tree-overview.md)
 - 理解 LSM Tree 的基本概念、设计动机和应用场景
 
 #### 3.1.2 代码阅读 (30 分钟)
 
 - 浏览项目整体结构
-- 查看 [README.md](../README.md) 了解项目特性
+- 查看 [README.md](../../README.md) 了解项目特性
 
 #### 3.1.3 动手实践 (1 小时)
 
@@ -63,13 +63,13 @@ mvn test
 
 #### 3.2.1 理论学习 (1 小时)
 
-- 阅读 [docs/soucrce-code-analysis.md](../docs/soucrce-code-analysis.md) 第 3.1 节
-- 阅读 [tutorials/02-keyvalue-structure.md](../tutorials/02-keyvalue-structure.md)
+- 阅读 [docs/04-source-code-analysis.md](../../docs/04-source-code-analysis.md) 第 3.1 节
+- 阅读 [tutorials/02-keyvalue-structure.md](../02-keyvalue-structure.md)
 - 理解时间戳版本控制和墓碑标记机制
 
 #### 3.2.2 代码阅读 (1 小时)
 
-- 深入阅读 [KeyValue.java](../src/main/java/com/brianxiadong/lsmtree/KeyValue.java) 源码
+- 深入阅读 [KeyValue.java](../../src/main/java/com/brianxiadong/lsmtree/KeyValue.java) 源码
 - 理解 `Comparable` 接口的实现
 - 分析排序规则的设计
 
@@ -94,13 +94,13 @@ mvn test
 
 #### 3.3.1 理论学习 (1-2 小时)
 
-- 阅读 [docs/soucrce-code-analysis.md](../docs/soucrce-code-analysis.md) 第 3.2 节
-- 阅读 [tutorials/03-memtable-skiplist.md](../tutorials/03-memtable-skiplist.md)
+- 阅读 [docs/04-source-code-analysis.md](../../docs/04-source-code-analysis.md) 第 3.2 节
+- 阅读 [tutorials/03-memtable-skiplist.md](../03-memtable-skiplist.md)
 - 深入理解跳表数据结构的原理和优势
 
 #### 3.3.2 代码阅读 (1 小时)
 
-- 深入阅读 [MemTable.java](../src/main/java/com/brianxiadong/lsmtree/MemTable.java) 源码
+- 深入阅读 [MemTable.java](../../src/main/java/com/brianxiadong/lsmtree/MemTable.java) 源码
 - 理解 `ConcurrentSkipListMap` 的使用
 - 分析内存管理和刷盘触发机制
 
@@ -137,7 +137,7 @@ public class MemTablePerformanceAnalysis {
 - [ ] 能够进行 MemTable 性能测试
 - [ ] 完成 MemTable 组件级性能分析
 
-> **高级任务关联**：内存管理优化详见 [memory-optimization-guide.md](../docs/memory-optimization-guide.md) 中的 OptimizedMemTable 使用
+> **高级任务关联**：内存管理优化详见 [memory-optimization-guide.md](./memory-optimization-guide.md) 中的 OptimizedMemTable 使用
 
 ---
 
@@ -145,13 +145,13 @@ public class MemTablePerformanceAnalysis {
 
 #### 3.4.1 理论学习 (1-2 小时)
 
-- 阅读 [docs/soucrce-code-analysis.md](../docs/soucrce-code-analysis.md) 第 3.3 节
-- 阅读 [tutorials/04-sstable-disk-storage.md](../tutorials/04-sstable-disk-storage.md)
+- 阅读 [docs/04-source-code-analysis.md](../../docs/04-source-code-analysis.md) 第 3.3 节
+- 阅读 [tutorials/04-sstable-disk-storage.md](../04-sstable-disk-storage.md)
 - 理解不可变文件的设计理念
 
 #### 3.4.2 代码阅读 (1 小时)
 
-- 深入阅读 [SSTable.java](../src/main/java/com/brianxiadong/lsmtree/SSTable.java) 源码
+- 深入阅读 [SSTable.java](../../src/main/java/com/brianxiadong/lsmtree/SSTable.java) 源码
 - 理解文件格式和序列化机制
 - 分析查询优化策略
 
@@ -181,13 +181,13 @@ public class SSTableAnalyzer {
 
 #### 3.5.1 理论学习 (1-2 小时)
 
-- 阅读 [docs/soucrce-code-analysis.md](../docs/soucrce-code-analysis.md) 第 3.5 节
-- 阅读 [tutorials/05-bloom-filter.md](../tutorials/05-bloom-filter.md)
+- 阅读 [docs/04-source-code-analysis.md](../../docs/04-source-code-analysis.md) 第 3.5 节
+- 阅读 [tutorials/05-bloom-filter.md](../05-bloom-filter.md)
 - 深入理解概率数据结构的原理
 
 #### 3.5.2 代码阅读 (1 小时)
 
-- 深入阅读 [BloomFilter.java](../src/main/java/com/brianxiadong/lsmtree/BloomFilter.java) 源码
+- 深入阅读 [BloomFilter.java](../../src/main/java/com/brianxiadong/lsmtree/BloomFilter.java) 源码
 - 理解哈希函数的实现
 - 分析参数计算公式
 
@@ -217,13 +217,13 @@ public class BloomFilterTuning {
 
 #### 3.6.1 理论学习 (1-2 小时)
 
-- 阅读 [docs/soucrce-code-analysis.md](../docs/soucrce-code-analysis.md) 第 3.4 节
-- 阅读 [tutorials/06-wal-logging.md](../tutorials/06-wal-logging.md)
+- 阅读 [docs/04-source-code-analysis.md](../../docs/04-source-code-analysis.md) 第 3.4 节
+- 阅读 [tutorials/06-wal-logging.md](../06-wal-logging.md)
 - 理解数据持久性和崩溃恢复原理
 
 #### 3.6.2 代码阅读 (1 小时)
 
-- 深入阅读 [WriteAheadLog.java](../src/main/java/com/brianxiadong/lsmtree/WriteAheadLog.java) 源码
+- 深入阅读 [WriteAheadLog.java](../../src/main/java/com/brianxiadong/lsmtree/WriteAheadLog.java) 源码
 - 理解日志格式和恢复机制
 - 分析文件 I/O 优化策略
 
@@ -247,7 +247,7 @@ public class CrashRecoveryTest {
 - [ ] 掌握崩溃恢复流程
 - [ ] 能够优化 WAL 性能
 
-> **高级任务关联**：WAL 性能优化详见 [advanced-io-optimization.md](../docs/advanced-io-optimization.md) 中的 P1: WAL 批量刷盘策略
+> **高级任务关联**：WAL 性能优化详见 [advanced-io-optimization.md](./advanced-io-optimization.md) 中的 P1: WAL 批量刷盘策略
 
 ---
 
@@ -255,13 +255,13 @@ public class CrashRecoveryTest {
 
 #### 3.7.1 理论学习 (2 小时)
 
-- 阅读 [docs/soucrce-code-analysis.md](../docs/soucrce-code-analysis.md) 第 3.6 节
-- 阅读 [tutorials/07-compaction-strategy.md](../tutorials/07-compaction-strategy.md)
+- 阅读 [docs/04-source-code-analysis.md](../../docs/04-source-code-analysis.md) 第 3.6 节
+- 阅读 [tutorials/07-compaction-strategy.md](../07-compaction-strategy.md)
 - 理解分层压缩的设计原理
 
 #### 3.7.2 代码阅读 (1 小时)
 
-- 深入阅读 [CompactionStrategy.java](../src/main/java/com/brianxiadong/lsmtree/CompactionStrategy.java) 源码
+- 深入阅读 [CompactionStrategy.java](../../src/main/java/com/brianxiadong/lsmtree/CompactionStrategy.java) 源码
 - 理解多路归并算法
 - 分析压缩触发条件
 
@@ -305,13 +305,13 @@ public class CompactionPerformanceAnalysis {
 
 #### 3.8.1 理论学习 (2 小时)
 
-- 阅读 [docs/soucrce-code-analysis.md](../docs/soucrce-code-analysis.md) 第 3.7 节
-- 阅读 [tutorials/08-lsm-tree-main.md](../tutorials/08-lsm-tree-main.md)
+- 阅读 [docs/04-source-code-analysis.md](../../docs/04-source-code-analysis.md) 第 3.7 节
+- 阅读 [tutorials/08-lsm-tree-main.md](../08-lsm-tree-main.md)
 - 理解组件协调和并发控制机制
 
 #### 3.8.2 代码阅读 (1-2 小时)
 
-- 深入阅读 [LSMTree.java](../src/main/java/com/brianxiadong/lsmtree/LSMTree.java) 源码
+- 深入阅读 [LSMTree.java](../../src/main/java/com/brianxiadong/lsmtree/LSMTree.java) 源码
 - 理解读写锁的使用
 - 分析写入和查询流程
 
@@ -341,13 +341,13 @@ public class ConcurrencyBenchmark {
 
 #### 3.9.1 理论学习 (1-2 小时)
 
-- 阅读 [docs/performance-analysis-guide.md](../docs/performance-analysis-guide.md) 第 1-2 节
+- 阅读 [docs/07-performance-analysis-guide.md](../../docs/07-performance-analysis-guide.md) 第 1-2 节
 - 理解性能分析的基本方法论
 
 #### 3.9.2 工具学习 (1 小时)
 
 - 学习 JProfiler 的基本使用
-- 学习 [test-suite/](../test-suite/) 性能测试工具
+- 学习 [test-suite/](../../test-suite/) 性能测试工具
 
 #### 3.9.3 动手实践 (3 小时)
 
@@ -390,7 +390,7 @@ public class EndToEndPerformanceAnalysis {
 
 #### 3.10.1 理论学习 (1-2 小时)
 
-- 阅读 [docs/performance-analysis-guide.md](../docs/performance-analysis-guide.md) 第 3-4 节
+- 阅读 [docs/07-performance-analysis-guide.md](../../docs/07-performance-analysis-guide.md) 第 3-4 节
 - 理解 JVM 内存管理和 GC 原理
 
 #### 3.10.2 工具学习 (1 小时)
@@ -579,8 +579,8 @@ public interface Compression {
 接下来的进阶之路，请参考项目中的其他专项文档：
 
 - **后续开发任务**: 详见 [advanced-tasks.md](./advanced-tasks.md) (包含 T3-T12 的完整开发路线图)
-- **性能分析指南**: 详见 [docs/performance-analysis-guide.md](../docs/performance-analysis-guide.md) (包含系统性性能优化方法论、工具使用和指标体系)
-- **更多学习资源**: 请查阅项目根目录的 [README.md](../README.md)
+- **性能分析指南**: 详见 [docs/07-performance-analysis-guide.md](../../docs/07-performance-analysis-guide.md) (包含系统性性能优化方法论、工具使用和指标体系)
+- **更多学习资源**: 请查阅项目根目录的 [README.md](../../README.md)
 
 愿你在系统编程的道路上越走越远！
 

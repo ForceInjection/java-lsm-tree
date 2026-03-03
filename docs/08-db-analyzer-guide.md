@@ -544,6 +544,6 @@ java -cp target/classes com.brianxiadong.lsmtree.tools.SSTableAnalyzer -v data/f
 
 ## 7. 相关文档
 
-- [LSM Tree 架构文档](lsm-tree-deep-dive.md)
-- [SSTable 实现详解](04-sstable-disk-storage.md)
-- [性能分析指南](performance-analysis-guide.md)
+- [LSM Tree 架构文档](02-lsm-tree-deep-dive.md)
+- [SSTable 磁盘存储](../tutorials/04-sstable-disk-storage.md)
+- [性能分析指南](07-performance-analysis-guide.md)

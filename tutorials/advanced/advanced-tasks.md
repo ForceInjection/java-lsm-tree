@@ -2,16 +2,16 @@
 
 ## 1. 概述
 
-基于 [README.md](../README.md) 中的规划功能和项目扩展需求，本文档详细列出了 Java LSM Tree 项目的高级开发任务。这些任务分为四个阶段，从核心功能扩展到生产环境特性，每个任务都包含详细的技术要求和验收标准。
+基于 [README.md](../../README.md) 中的规划功能和项目扩展需求，本文档详细列出了 Java LSM Tree 项目的高级开发任务。这些任务分为四个阶段，从核心功能扩展到生产环境特性，每个任务都包含详细的技术要求和验收标准。
 
 ### 1.1 相关文档索引
 
-| 文档类型 | 文档名称                                                             | 说明                       |
-| -------- | -------------------------------------------------------------------- | -------------------------- |
-| 主文档   | [advanced-tasks.md](./advanced-tasks.md)                             | 高级开发任务总览（本文档） |
-| 技术方案 | [advanced-io-optimization.md](../docs/advanced-io-optimization.md)   | I/O 优化技术方案（P0-P4）  |
-| 技术方案 | [memory-optimization-guide.md](../docs/memory-optimization-guide.md) | 内存优化使用指南（T8）     |
-| 学习计划 | [learning-plan.md](./learning-plan.md)                               | 14 天循序渐进学习计划      |
+| 文档类型 | 文档名称                                                       | 说明                       |
+| -------- | -------------------------------------------------------------- | -------------------------- |
+| 主文档   | [advanced-tasks.md](./advanced-tasks.md)                       | 高级开发任务总览（本文档） |
+| 技术方案 | [advanced-io-optimization.md](./advanced-io-optimization.md)   | I/O 优化技术方案（P0-P4）  |
+| 技术方案 | [memory-optimization-guide.md](./memory-optimization-guide.md) | 内存优化使用指南（T8）     |
+| 学习计划 | [learning-plan.md](./learning-plan.md)                         | 14 天循序渐进学习计划      |
 
 ### 1.2 文档关系图
 
@@ -35,8 +35,9 @@
 
 ### 1.3 快速导航
 
-- **T7 异步 I/O 任务**：详细技术方案见 [advanced-io-optimization.md](../docs/advanced-io-optimization.md)
-- **T8 内存优化任务**：使用指南见 [memory-optimization-guide.md](../docs/memory-optimization-guide.md)
+- **T1 & T3 核心改进**：实现分析与生产级优化方案见 [production-readiness-analysis.md](./production-readiness-analysis.md)
+- **T7 异步 I/O 任务**：详细技术方案见 [advanced-io-optimization.md](./advanced-io-optimization.md)
+- **T8 内存优化任务**：使用指南见 [memory-optimization-guide.md](./memory-optimization-guide.md)
 - **学习路径**：开始前建议先完成 [learning-plan.md](./learning-plan.md) 的相关天数内容
 
 ## 2. 任务依赖关系与技术选型
@@ -161,6 +162,8 @@
 
 #### 3.1.2 技术要求
 
+> **重要参考**：关于 SSTable 查询性能的深度分析与生产级优化方案（稀疏索引），请务必阅读 [production-readiness-analysis.md](./production-readiness-analysis.md#2-sstable-查询机制全表扫描-vs-稀疏索引)。
+
 - 设计 `RangeQuery` 接口，支持开区间、闭区间查询
 - 实现多层数据合并算法（MemTable + 多个 SSTable）
 - 支持正向和反向迭代（Reverse Scan）
@@ -257,6 +260,8 @@ public interface CompressionStrategy {
 实现除 Leveled Compaction 外的其他合并策略，并确保空间有效回收。
 
 #### 3.3.2 技术要求
+
+> **重要参考**：关于压缩策略的内存风险分析与流式归并优化方案，请务必阅读 [production-readiness-analysis.md](./production-readiness-analysis.md#3-压缩策略全量内存合并-vs-流式归并)。
 
 - 实现 Size-Tiered Compaction 策略
 - 实现 Universal Compaction 策略
@@ -489,7 +494,7 @@ public interface CacheManager {
 
 使用 NIO 和异步 I/O 提高系统吞吐量，重点实现 Group Commit 机制。
 
-> **技术方案文档**：[T7: 异步 I/O (Async I/O) 优化技术方案](../docs/advanced-io-optimization.md)
+> **技术方案文档**：[T7: 异步 I/O (Async I/O) 优化技术方案](./advanced-io-optimization.md)
 > 本文档提供了详细的 T7 技术实现方案，包含：
 >
 > - P0: Group Commit (批量提交) - **核心优化点**
@@ -560,7 +565,7 @@ public interface AsyncIOManager {
 
 优化内存使用，减少 GC 压力，提高系统稳定性。重点关注堆外内存（Off-heap）的管理和对象复用。
 
-> **技术方案文档**：[T8 内存优化技术方案与指南](../docs/memory-optimization-guide.md)
+> **技术方案文档**：[T8 内存优化技术方案与指南](./memory-optimization-guide.md)
 > 本文档提供了 T8 的详细实施指南，包含：
 >
 > - MemoryManager 内存管理器使用

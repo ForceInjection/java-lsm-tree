@@ -379,6 +379,8 @@ cat audit_report.json | jq '.entries[] | select(.key | startswith("user:"))'
 - 检查 PUT/DELETE 操作的数据完整性
 - 确认测试场景覆盖的操作类型分布
 
+---
+
 ## 7. 使用注意事项
 
 ### 7.1 常见问题与解决方案

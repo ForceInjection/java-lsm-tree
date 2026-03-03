@@ -1,14 +1,16 @@
 # T7: 异步 I/O (Async I/O) 优化技术方案
 
-> **关联任务**：本文档是 [advanced-tasks.md](../learn/advanced-tasks.md) 中 **T7: 异步 I/O 任务** 的详细技术方案。
+> **关联任务**：本文档是 [advanced-tasks.md](./advanced-tasks.md) 中 **T7: 异步 I/O 任务** 的详细技术方案。
 >
-> **前置学习**：建议先完成 [learning-plan.md](../learn/learning-plan.md) 中第 6 天（WAL）和第 9 天（性能测试）的内容。
+> **前置学习**：建议先完成 [learning-plan.md](./learning-plan.md) 中第 6 天（WAL）和第 9 天（性能测试）的内容。
 
 本文档描述了未来可以实施的高级 I/O 优化任务，旨在提升写入吞吐量和读取性能。
 
-## 一、背景与现状
+---
 
-### 当前实现
+## 1. 背景与现状
+
+### 1.1 当前实现
 
 | 组件         | 当前策略   | 实现方式                                   |
 | ------------ | ---------- | ------------------------------------------ |
@@ -17,13 +19,13 @@
 | SSTable 读取 | 同步读取   | `FileChannel.read()`                       |
 | 线程管理     | 简单线程池 | `ExecutorService`                          |
 
-### 当前选择同步 I/O 的原因
+### 1.2 当前选择同步 I/O 的原因
 
 1. **线程安全**：避免 `AsynchronousFileChannel` 创建的系统线程无法正常终止
 2. **数据可靠性**：WAL 同步写入保证崩溃恢复无数据丢失
 3. **符合业界实践**：RocksDB/LevelDB 的 SSTable 写入也是同步的
 
-### 性能瓶颈分析
+### 1.3 性能瓶颈分析
 
 ```text
 写入路径延迟分解：
@@ -41,7 +43,7 @@
 
 ---
 
-## 二、优化方案概览
+## 2. 优化方案概览
 
 ```text
 优先级排序：
@@ -58,7 +60,7 @@
 
 ---
 
-## 三、P0: Group Commit (批量提交)
+## 3. P0: Group Commit (批量提交)
 
 ### 3.1 原理
 
@@ -159,7 +161,7 @@ public class GroupCommitManager {
 
 ---
 
-## 四、P1: WAL 批量刷盘策略
+## 4. P1: WAL 批量刷盘策略
 
 ### 4.1 原理
 
@@ -217,7 +219,7 @@ LSMTree tree = new LSMTree.Builder(dataDir)
 
 ---
 
-## 五、P2: 异步读取优化
+## 5. P2: 异步读取优化
 
 ### 5.1 原理
 
@@ -289,7 +291,7 @@ public class AsyncSSTableReader {
 
 ---
 
-## 六、P3: Direct I/O 支持
+## 6. P3: Direct I/O 支持
 
 ### 6.1 原理
 
@@ -345,7 +347,7 @@ public class DirectIOWriter {
 
 ---
 
-## 七、P4: 可配置的持久性级别
+## 7. P4: 可配置的持久性级别
 
 ### 7.1 设计目标
 
@@ -395,28 +397,28 @@ LSMTree appDb = new LSMTree.Builder("/data/app")
 
 ---
 
-## 八、实施路线图
+## 8. P5: 实施路线图
 
-### Phase 1: 基础优化 (2-3 周)
+### 8.1 Phase 1: 基础优化 (2-3 周)
 
 - [ ] 实现 WAL 批量刷盘策略
 - [ ] 添加持久性级别配置 API
 - [ ] 编写性能基准测试
 
-### Phase 2: Group Commit (3-4 周)
+### 8.2 Phase 2: Group Commit (3-4 周)
 
 - [ ] 设计 Group Commit 架构
 - [ ] 实现批量写入合并
 - [ ] 并发测试和调优
 
-### Phase 3: 异步读取 (4-5 周)
+### 8.3 Phase 3: 异步读取 (4-5 周)
 
 - [ ] 实现异步 MultiGet
 - [ ] 实现范围查询预取
 - [ ] 线程池管理和资源清理
 - [ ] 性能对比测试
 
-### Phase 4: Direct I/O (可选) (2-3 周)
+### 8.4 Phase 4: Direct I/O (可选) (2-3 周)
 
 - [ ] 实现 Direct I/O 写入
 - [ ] 对齐处理
@@ -424,9 +426,9 @@ LSMTree appDb = new LSMTree.Builder("/data/app")
 
 ---
 
-## 九、性能验证方案
+## 9. P6: 性能验证方案
 
-### 基准测试配置
+### 9.1 基准测试配置
 
 ```bash
 # 写入性能测试
@@ -446,7 +448,7 @@ java -jar java-lsm-tree-1.0.0.jar \
     --async-read true
 ```
 
-### 预期性能指标
+### 9.2 预期性能指标
 
 | 指标                | 当前值        | 优化后目标     | 提升  |
 | ------------------- | ------------- | -------------- | ----- |
@@ -457,7 +459,7 @@ java -jar java-lsm-tree-1.0.0.jar \
 
 ---
 
-## 十、参考资料
+## 10. P7: 参考资料
 
 1. [RocksDB WAL Performance](https://github.com/facebook/rocksdb/wiki/WAL-Performance)
 2. [Asynchronous IO in RocksDB](https://rocksdb.org/blog/2022/10/07/asynchronous-io-in-rocksdb.html)
@@ -465,7 +467,3 @@ java -jar java-lsm-tree-1.0.0.jar \
 4. [PostgreSQL synchronous_commit](https://www.postgresql.org/docs/current/wal-async-commit.html)
 
 ---
-
-_文档版本: 1.0_  
-_创建日期: 2026-02-28_  
-_最后更新: 2026-02-28_

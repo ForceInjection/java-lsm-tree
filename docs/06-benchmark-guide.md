@@ -358,9 +358,9 @@ export MAVEN_VERSION="3.9.6-eclipse-temurin-17"
 
 ## 8. 相关文档
 
-- [LSM Tree 深度解析](./lsm-tree-deep-dive.md)
-- [性能分析指南](./performance-analysis-guide.md)
-- [源码分析文档](./soucrce-code-analysis.md)
-- [测试套件使用指南](./test-suite-guide.md)
-- [WAL 分析工具指南](./wal-analyzer-guide.md)
-- [SSTable 分析工具指南](./db-analyzer-guide.md)
+- [LSM Tree 深度解析](./02-lsm-tree-deep-dive.md)
+- [性能分析指南](./07-performance-analysis-guide.md)
+- [源码分析文档](./04-source-code-analysis.md)
+- [测试套件使用指南](./05-test-suite-guide.md)
+- [WAL 分析工具指南](./09-wal-analyzer-guide.md)
+- [SSTable 分析工具指南](./08-db-analyzer-guide.md)

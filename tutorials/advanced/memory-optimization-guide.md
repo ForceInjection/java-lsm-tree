@@ -1,16 +1,18 @@
 # T8 内存优化技术方案与指南
 
-> **关联任务**：本文档是 [advanced-tasks.md](../learn/advanced-tasks.md) 中 **T8: 内存管理优化任务** 的核心参考文档。
+> **关联任务**：本文档是 [advanced-tasks.md](./advanced-tasks.md) 中 **T8: 内存管理优化任务** 的核心参考文档。
 >
-> **前置学习**：建议先完成 [learning-plan.md](../learn/learning-plan.md) 中第 3 天（MemTable）和第 9 天（性能测试）的内容。
+> **前置学习**：建议先完成 [learning-plan.md](./learning-plan.md) 中第 3 天（MemTable）和第 9 天（性能测试）的内容。
 
-## 概述
+## 1. 概述
 
 T8内存优化模块为Java LSM Tree提供了完整的内存管理解决方案，包括对象池、堆外内存管理、GC优化和实时监控等功能。
 
-## 核心组件
+---
 
-### 1. MemoryManager 内存管理器
+## 2. 核心组件
+
+### 2.1 MemoryManager 内存管理器
 
 ```java
 // 创建默认内存管理器
@@ -23,7 +25,7 @@ memoryManager.enableOptimization();
 memoryManager.disableOptimization();
 ```
 
-### 2. 对象池 (ObjectPool)
+### 2.2 对象池 (ObjectPool)
 
 ```java
 // 获取特定类型的对象池
@@ -41,7 +43,7 @@ try {
 }
 ```
 
-### 3. 堆外内存管理
+### 2.3 堆外内存管理
 
 ```java
 // 分配堆外内存
@@ -54,7 +56,7 @@ ByteBuffer heapBuffer = memoryManager.allocate(4096, false); // 4KB堆内缓冲�
 memoryManager.deallocate(directBuffer);
 ```
 
-### 4. 内存监控
+### 2.4 内存监控
 
 ```java
 // 获取内存使用统计
@@ -69,7 +71,9 @@ MemoryMonitor monitor = new MemoryMonitor();
 monitor.printDetailedMemoryInfo();
 ```
 
-## 优化的MemTable
+---
+
+## 3. 优化的MemTable
 
 ```java
 // 创建优化的MemTable
@@ -91,7 +95,9 @@ System.out.println("对象池统计: " + optStats.getKeyValuePoolStats());
 System.out.println("内存使用统计: " + optStats.getMemoryStats());
 ```
 
-## GC配置优化
+---
+
+## 4. GC配置优化
 
 ```java
 // 配置GC参数
@@ -109,9 +115,11 @@ String[] jvmArgs = gcConfig.toJvmArgs();
 System.out.println("推荐的JVM参数: " + Arrays.toString(jvmArgs));
 ```
 
-## 最佳实践
+---
 
-### 1. 对象池使用建议
+## 5. 最佳实践
+
+### 5.1 对象池使用建议
 
 ```java
 // ✅ 正确用法
@@ -132,7 +140,49 @@ sb.append("data");
 // 缺少 pool.returnObject(sb);
 ```
 
-### 2. 内存监控最佳实践
+### 5.2 对象状态重置 (Object Reset)
+
+对象复用的核心不仅是借还，还包括确保对象在复用前是“干净”的。如果忘记重置状态，可能会导致数据污染或逻辑错误。
+
+**原则**：
+
+1. **借出时重置**（推荐）：在 `borrowObject` 后立即重置，或在 `ObjectPool` 实现中重写 `borrowObject` 自动重置。
+2. **归还时重置**：在 `returnObject` 前重置。
+
+**示例：可重置的 KeyValue**：
+
+```java
+public class KeyValue {
+    private String key;
+    private String value;
+
+    // ... 构造函数等 ...
+
+    // 添加重置方法
+    public void reset() {
+        this.key = null;
+        this.value = null;
+    }
+}
+
+// 在使用时
+ObjectPool<KeyValue> pool = memoryManager.getObjectPool(KeyValue.class);
+KeyValue kv = pool.borrowObject();
+try {
+    // 1. 务必重置状态（除非确定 pool.borrowObject() 内部已重置）
+    kv.reset();
+
+    // 2. 设置新值
+    kv.setKey("newKey");
+    kv.setValue("newValue");
+
+    // ... 业务逻辑 ...
+} finally {
+    pool.returnObject(kv);
+}
+```
+
+### 5.3 内存监控最佳实践
 
 ```java
 // 定期监控内存使用
@@ -154,7 +204,7 @@ scheduler.scheduleAtFixedRate(() -> {
 }, 0, 30, TimeUnit.SECONDS);
 ```
 
-### 3. 大数据量场景优化
+### 5.4 大数据量场景优化
 
 ```java
 // 大数据量插入优化
@@ -179,7 +229,7 @@ public void bulkInsertOptimized(List<KeyValue> data) {
 }
 ```
 
-### 4. 性能调优建议
+### 5.5 性能调优建议
 
 ```java
 // 根据工作负载调整对象池大小
@@ -194,7 +244,9 @@ sbPool.setMinIdle(10);    // 最小空闲对象
 sbPool.setMaxIdle(100);   // 最大空闲对象
 ```
 
-## 性能基准测试
+---
+
+## 6. 性能基准测试
 
 ```java
 // 运行集成测试
@@ -208,9 +260,11 @@ LargeScaleMemoryBenchmark.main(new String[]{});
 MemoryOptimizationBenchmark.main(new String[]{});
 ```
 
-## 故障排除
+---
 
-### 常见问题
+## 7. 故障排除
+
+### 7.1 常见问题
 
 1. **内存泄漏**
    - 确保所有borrowed对象都被正确returned
@@ -227,7 +281,7 @@ MemoryOptimizationBenchmark.main(new String[]{});
    - 调整预填充大小
    - 优化回收策略参数
 
-### 监控指标
+### 7.2 监控指标
 
 重点关注以下指标：
 
@@ -236,9 +290,11 @@ MemoryOptimizationBenchmark.main(new String[]{});
 - GC暂停时间 < 100ms
 - GC频率 < 每分钟5次
 
-## 配置参考
+---
 
-### 推荐的JVM参数
+## 8. 配置参考
+
+### 8.1 推荐的JVM参数
 
 ```bash
 # G1GC优化配置
@@ -250,7 +306,7 @@ MemoryOptimizationBenchmark.main(new String[]{});
 -XX:+UseCompressedOops
 ```
 
-### 对象池配置建议
+### 8.2 对象池配置建议
 
 ```java
 // 高频使用的对象池

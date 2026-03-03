@@ -15,24 +15,26 @@
 - **布隆过滤器**: 减少无效磁盘 IO
 - **范围查询**: 支持高效的范围扫描和反向扫描
 - **数据压缩**: 支持 LZ4 压缩算法
-- **缓存系统**: 内置 LRU/LFU 缓存策略
+- **缓存系统**: 内置 LRU/LFU 缓存策略，支持自定义配置
 - **监控指标**: 集成 Micrometer 指标收集，支持 Prometheus 导出
 - **内存优化**: 对象池、堆外内存管理等优化机制
+- **异步 I/O**: 支持异步批处理 I/O 操作
+- **分区支持**: 支持基于一致性哈希和范围的分区策略
 
 ## 技术栈
 
-| 组件 | 版本/说明 |
-|------|----------|
-| Java | 8（源代码和目标均为 Java 8）|
-| 构建工具 | Maven 3.8+ |
-| 测试框架 | JUnit 4.13.2 |
-| 指标监控 | Micrometer 1.10.5（含 Prometheus 支持）|
-| 压缩算法 | LZ4 Java 1.8.0 |
-| 代码覆盖率 | JaCoCo 0.8.8（要求最低 33% 行覆盖率）|
+| 组件       | 版本/说明                               |
+| ---------- | --------------------------------------- |
+| Java       | 8（源代码和目标均为 Java 8）            |
+| 构建工具   | Maven 3.8+                              |
+| 测试框架   | JUnit 4.13.2                            |
+| 指标监控   | Micrometer 1.10.5（含 Prometheus 支持） |
+| 压缩算法   | LZ4 Java 1.8.0                          |
+| 代码覆盖率 | JaCoCo 0.8.8（要求最低 33% 行覆盖率）   |
 
 ## 项目结构
 
-```
+```text
 java-lsm-tree/
 ├── src/
 │   ├── main/java/com/brianxiadong/lsmtree/    # 主源码
@@ -58,7 +60,9 @@ java-lsm-tree/
 │   │   ├── NoopLSMTreeMetrics.java       # 空指标实现
 │   │   ├── MetricsRegistry.java          # 指标注册中心
 │   │   ├── MetricsHttpServer.java        # HTTP 指标服务器
-│   │   ├── AsyncIOManager.java           # 异步 I/O 接口
+│   │   ├── AsyncIO.java                  # 异步 I/O 接口定义
+│   │   ├── AsyncIOBatch.java             # 异步 I/O 批处理
+│   │   ├── AsyncIOManager.java           # 异步 I/O 管理器接口
 │   │   ├── NioAsyncIOManager.java        # NIO 异步 I/O 实现
 │   │   ├── LSMTreeExample.java           # 使用示例
 │   │   ├── BenchmarkRunner.java          # 基准测试运行器
@@ -68,7 +72,11 @@ java-lsm-tree/
 │   │   │   ├── LRUCache.java             # LRU 缓存实现
 │   │   │   ├── LFUCache.java             # LFU 缓存实现
 │   │   │   ├── Block.java                # 缓存块定义
-│   │   │   └── CacheStats.java           # 缓存统计
+│   │   │   ├── CacheStats.java           # 缓存统计
+│   │   │   ├── CacheException.java       # 缓存异常
+│   │   │   ├── CacheStrategy.java        # 缓存策略枚举
+│   │   │   ├── CacheType.java            # 缓存类型枚举
+│   │   │   └── InternalCache.java        # 内部缓存接口
 │   │   ├── memory/                       # 内存管理模块
 │   │   │   ├── MemoryManager.java        # 内存管理器接口
 │   │   │   ├── DefaultMemoryManager.java # 默认内存管理器
@@ -77,13 +85,16 @@ java-lsm-tree/
 │   │   │   ├── MemoryUsageStats.java     # 内存使用统计
 │   │   │   ├── ObjectPool.java           # 对象池接口
 │   │   │   ├── GenericObjectPool.java    # 通用对象池实现
+│   │   │   ├── PoolStats.java            # 对象池统计
 │   │   │   ├── OptimizedMemTable.java    # 优化版内存表
+│   │   │   ├── MemoryOptimizationTest.java # 内存优化测试运行器
 │   │   │   └── GCConfig.java             # GC 配置
 │   │   └── tools/                        # 工具类
 │   │       ├── SSTableAnalyzer.java      # SSTable 分析器
 │   │       ├── SSTableAnalyzerCLI.java   # SSTable 分析器 CLI
 │   │       ├── WALAnalyzer.java          # WAL 分析器
-│   │       └── WALAnalyzerCLI.java       # WAL 分析器 CLI
+│   │       ├── WALAnalyzerCLI.java       # WAL 分析器 CLI
+│   │       └── RangeBenchmarkRunner.java # 范围查询基准测试工具
 │   └── test/java/com/brianxiadong/lsmtree/    # 测试代码（51+ 测试类）
 │       ├── LSMTreeTest.java              # 核心功能测试
 │       ├── MemTableTest.java             # 内存表测试
@@ -106,13 +117,13 @@ java-lsm-tree/
 
 ### 写入流程
 
-```
+```text
 Write -> WAL (持久化) -> MemTable (内存跳表) -> (满了) -> SSTable (磁盘)
 ```
 
 ### 查询流程
 
-```
+```text
 1. 查询 MemTable (活跃)
 2. 查询 Immutable MemTables (按时间倒序)
 3. 查询 SSTables (按创建时间倒序，使用布隆过滤器优化)
@@ -120,7 +131,7 @@ Write -> WAL (持久化) -> MemTable (内存跳表) -> (满了) -> SSTable (磁�
 
 ### 分层压缩架构
 
-```
+```text
 Level 0: [SSTable] [SSTable] [SSTable] [SSTable]  (默认 4 个文件时触发压缩)
 Level 1: [SSTable] [SSTable] ... (默认 40 个文件时触发压缩)
 Level 2: [SSTable] [SSTable] ... (默认 400 个文件时触发压缩)
@@ -129,17 +140,19 @@ Level 2: [SSTable] [SSTable] ... (默认 400 个文件时触发压缩)
 
 ### 关键类说明
 
-| 类名 | 职责 |
-|------|------|
-| `LSMTree` | 主入口类，整合所有组件，提供 put/get/delete/range API |
-| `MemTable` | 内存中的有序表，使用 `ConcurrentSkipListMap` 实现 |
-| `SSTable` | 磁盘上的有序不可变文件，包含布隆过滤器 |
-| `BloomFilter` | 布隆过滤器，快速判断键是否可能存在 |
-| `WriteAheadLog` | 写前日志，确保崩溃恢复，使用同步 FileChannel |
-| `LeveledCompactionStrategy` | 分层压缩策略（LevelDB 风格）|
-| `SizeTieredCompactionStrategy` | Size-Tiered 压缩策略（Cassandra 风格）|
-| `RangeQuery` | 范围查询实现，支持正序和倒序扫描 |
-| `CacheManagerImpl` | 缓存管理器，支持 LRU/LFU 策略 |
+| 类名                           | 职责                                                  |
+| ------------------------------ | ----------------------------------------------------- |
+| `LSMTree`                      | 主入口类，整合所有组件，提供 put/get/delete/range API |
+| `PartitionedLSMTree`           | 支持分区的 LSM Tree 实现，用于大规模数据集            |
+| `MemTable`                     | 内存中的有序表，使用 `ConcurrentSkipListMap` 实现     |
+| `SSTable`                      | 磁盘上的有序不可变文件，包含布隆过滤器                |
+| `BloomFilter`                  | 布隆过滤器，快速判断键是否可能存在                    |
+| `WriteAheadLog`                | 写前日志，确保崩溃恢复，使用同步 FileChannel          |
+| `LeveledCompactionStrategy`    | 分层压缩策略（LevelDB 风格）                          |
+| `SizeTieredCompactionStrategy` | Size-Tiered 压缩策略（Cassandra 风格）                |
+| `RangeQuery`                   | 范围查询实现，支持正序和倒序扫描                      |
+| `CacheManagerImpl`             | 缓存管理器，支持 LRU/LFU 策略                         |
+| `AsyncIOManager`               | 异步 I/O 管理器，处理非阻塞文件操作                   |
 
 ## 构建和测试命令
 
@@ -185,23 +198,41 @@ mvn test -Dtest=LSMTreeTest,RangeQueryTest
 
 ### 测试套件（推荐）
 
+本项目提供了一个综合测试套件 `test-suite/test-suite.sh`，集成了单元测试、功能测试、性能测试和压力测试。
+
+**基本用法**:
+
+```text
+./test-suite/test-suite.sh [命令] [参数]
+```
+
+**常用命令**:
+
 ```bash
-# 运行所有测试
+# 运行所有测试（默认）
 ./test-suite/test-suite.sh all
 
 # 运行特定测试类型
 ./test-suite/test-suite.sh unit         # 单元测试
 ./test-suite/test-suite.sh functional   # 功能测试
+./test-suite/test-suite.sh tools        # 工具与 CLI 测试
 ./test-suite/test-suite.sh performance  # 性能测试
-./test-suite/test-suite.sh memory       # 内存测试
 ./test-suite/test-suite.sh stress       # 压力测试
-./test-suite/test-suite.sh tools        # 工具测试
+
+# 专项测试
+./test-suite/test-suite.sh cache-benchmark # 缓存策略对比基准测试
+./test-suite/test-suite.sh memory-opt      # 内存优化专项测试（百万级数据）
 
 # 会话管理
 ./test-suite/test-suite.sh list                    # 列出所有测试会话
 ./test-suite/test-suite.sh show <session-id>       # 查看会话详情
 ./test-suite/test-suite.sh delete <session-id>     # 删除会话
-./test-suite/test-suite.sh clean                   # 清理测试环境
+./test-suite/test-suite.sh report <session-id>     # 重新生成会话报告
+./test-suite/test-suite.sh archive <days>          # 归档指定天数前的会话
+
+# 环境清理
+./test-suite/test-suite.sh clean                   # 清理当前测试环境
+./test-suite/test-suite.sh clean-all               # 清理所有测试数据和历史记录
 ```
 
 ### 分析工具
@@ -230,6 +261,7 @@ mvn test -Dtest=LSMTreeTest,RangeQueryTest
 - 复杂算法需注明时间/空间复杂度
 
 示例：
+
 ```java
 /**
  * 插入键值对
@@ -262,7 +294,7 @@ public void put(String key, String value) throws IOException {
 
 项目包含 51+ 个测试类，每个测试类独立管理自己的生命周期：
 
-```
+```text
 src/test/java/com/brianxiadong/lsmtree/
 ├── LSMTreeTest.java                    # 核心功能测试
 ├── MemTableTest.java                   # 内存表测试
@@ -335,20 +367,22 @@ log.pass();  // 测试通过
 
 ### MemTable 大小选择
 
-| 大小 | 特点 | 适用场景 |
-|------|------|----------|
-| 1K-5K | 低内存占用，频繁刷盘 | 内存受限环境 |
-| 10K-20K | 平衡内存和性能 | 一般场景 |
-| 50K+ | 高写入吞吐量，需要更多内存 | 写密集型场景 |
+| 大小    | 特点                       | 适用场景     |
+| ------- | -------------------------- | ------------ |
+| 1K-5K   | 低内存占用，频繁刷盘       | 内存受限环境 |
+| 10K-20K | 平衡内存和性能             | 一般场景     |
+| 50K+    | 高写入吞吐量，需要更多内存 | 写密集型场景 |
 
 ### 压缩策略配置
 
 **Leveled Compaction（默认）**:
+
 - Level 0 最大文件数：4
 - 每级大小倍数：10
 - 适合：读密集型、需要空间效率的场景
 
 **Size-Tiered Compaction**:
+
 - 最小文件数阈值：4
 - 大小倍数：1.5
 - 适合：写密集型、能接受更多空间放大的场景
@@ -356,6 +390,7 @@ log.pass();  // 测试通过
 ### WAL 同步配置
 
 可通过系统属性配置：
+
 - `lsm.wal.sync.batch`：批处理大小（默认 64）
 - `lsm.wal.sync.interval.ms`：同步间隔毫秒（默认 50ms）
 
@@ -422,8 +457,9 @@ curl http://localhost:9090/metrics
 ## 参考资料
 
 - [README.md](README.md) - 项目完整说明
-- [docs/lsm-tree-deep-dive.md](docs/lsm-tree-deep-dive.md) - LSM Tree 深度解析
-- [docs/benchmark-guide.md](docs/benchmark-guide.md) - 性能基准测试指南
-- [docs/test-suite-guide.md](docs/test-suite-guide.md) - 测试套件使用说明
-- [docs/memory-optimization-guide.md](docs/memory-optimization-guide.md) - 内存优化指南
+- [docs/02-lsm-tree-deep-dive.md](docs/02-lsm-tree-deep-dive.md) - LSM Tree 深度解析
+- [docs/06-benchmark-guide.md](docs/06-benchmark-guide.md) - 性能基准测试指南
+- [tutorials/advanced/production-readiness-analysis.md](tutorials/advanced/production-readiness-analysis.md) - 生产就绪性分析（关键）
+- [docs/05-test-suite-guide.md](docs/05-test-suite-guide.md) - 测试套件使用说明
+- [tutorials/advanced/memory-optimization-guide.md](tutorials/advanced/memory-optimization-guide.md) - 内存优化指南
 - [tutorials/](tutorials/) - 详细实现教程（8 篇）
